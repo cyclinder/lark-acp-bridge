@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Exec(go build)",
+      "Exec(devin acp)",
+      "Exec(grep)",
+      "Exec(ls)",
+      "Exec(devin)",
+      "Exec(tail)"
+    ]
+  }
+}
