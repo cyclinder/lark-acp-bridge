@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package preflight checks that a local agent binary is installed and
 // responsive before the bridge tries to use it.
 package preflight

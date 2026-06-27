@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package acp implements a minimal Agent Client Protocol (ACP) client that
 // speaks JSON-RPC 2.0 over stdio with a `devin acp` subprocess.
 //

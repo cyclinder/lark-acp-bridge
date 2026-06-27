@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package commands implements the bridge's slash command dispatch and
 // individual command handlers. All commands are handled locally and never
 // invoke the agent subprocess, so they cost zero tokens.

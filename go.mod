@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 module github.com/cognition/lark-acp-bridge
 
 go 1.26.3

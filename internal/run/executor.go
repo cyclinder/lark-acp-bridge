@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package run orchestrates one agent prompt turn: it starts the adapter,
 // pumps events into the run-card state machine, and pushes card updates to
 // the Feishu channel via a StreamController. It also tracks active runs per

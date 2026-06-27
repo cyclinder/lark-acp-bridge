@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package card builds Feishu interactive card payloads and drives the
 // streaming run-card state machine.
 package card

@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package agent defines the provider-agnostic interface between the Feishu
 // side of the bridge and the local coding agent subprocess. v1 has one
 // implementation (DevinAdapter); v2 will add Claude and Codex without

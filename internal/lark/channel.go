@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package lark wraps the Feishu/Lark SDK channel module, providing the
 // Sender interface used by commands and run, and a message intake loop.
 package lark

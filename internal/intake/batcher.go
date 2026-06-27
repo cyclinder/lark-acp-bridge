@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package intake collects incoming messages per scope and batches them into
 // a single prompt after a debounce window. This handles the common pattern
 // of a user sending several short messages in quick succession: instead of

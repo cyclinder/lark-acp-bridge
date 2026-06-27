@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package provider holds the registry of available agent adapters and the
 // per-scope provider selection. The registry is built once at startup; the
 // selection is a persisted scope -> provider-id map that lets each chat

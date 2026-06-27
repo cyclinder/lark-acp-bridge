@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package session maps a chat scope (chatId or chatId:threadId) to an agent
 // session id and associated metadata.
 package session

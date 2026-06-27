@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package codex implements the AgentAdapter for the Codex CLI, driven
 // through `codex exec --json` (NDJSON event stream over stdout). Unlike the
 // Devin adapter, each Run spawns a fresh `codex exec` process that exits at

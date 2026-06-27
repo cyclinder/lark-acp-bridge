@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package workspace maps a chat scope to a working directory, and also
 // maintains a separate table of named workspace aliases used by /ws.
 package workspace

@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 // This file contains integration tests that spawn a real `devin acp`

@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package devin implements the AgentAdapter for the Devin CLI, driven
 // through `devin acp` (Agent Client Protocol over stdio).
 package devin

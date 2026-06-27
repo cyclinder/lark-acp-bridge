@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package log provides a minimal structured logger that writes JSON lines
 // to the bridge's log directory. It wraps the standard library log package
 // to keep dependencies at zero.

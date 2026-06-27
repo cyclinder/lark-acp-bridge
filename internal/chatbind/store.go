@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package chatbind persists the mapping between a Feishu / Lark group chat
 // created by the /open command and the working directory it was created for.
 // It is the single source of truth for /open reuse decisions: when a user

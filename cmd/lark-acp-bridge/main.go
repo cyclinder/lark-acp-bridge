@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Command lark-acp-bridge starts the Feishu/Lark to Devin ACP bridge.
 package main
 

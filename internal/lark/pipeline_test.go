@@ -1,3 +1,6 @@
+// Copyright 2026 cyclinder kuo
+// SPDX-License-Identifier: Apache-2.0
+
 // Package lark_test contains full-pipeline tests that verify the message
 // intake -> command dispatch -> run execution flow without a real Feishu
 // connection. It uses a mock channel that implements both the commands.Sender
