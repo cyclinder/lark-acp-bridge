@@ -1,0 +1,50 @@
+# Cross-compile the bridge for Linux/macOS on amd64/arm64 and attach the
+# binaries to the GitHub Release that triggered this run. Assets are named
+# lark-acp-bridge-<os>-<arch> so the README's
+# releases/latest/download/<asset> URLs stay stable across versions.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -trimpath -ldflags="-s -w" \
+            -o lark-acp-bridge-${{ matrix.goos }}-${{ matrix.goarch }} \
+            ./cmd/lark-acp-bridge
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lark-acp-bridge-${{ matrix.goos }}-${{ matrix.goarch }}

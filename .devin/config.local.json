@@ -6,7 +6,8 @@
       "Exec(grep)",
       "Exec(ls)",
       "Exec(devin)",
-      "Exec(tail)"
+      "Exec(tail)",
+      "Exec(go vet)"
     ]
   }
 }

@@ -28,6 +28,59 @@ adds **Codex** and a `/provider` switch command.
   also needs the `im:chat:create` and `im:chat:members:write` scopes so it
   can create groups and add users.
 
+## Install
+
+### Option A: download a prebuilt binary
+
+Each release publishes prebuilt binaries to GitHub Releases. Download the one
+matching your OS/arch from the
+[releases page](https://github.com/cyclinder/lark-acp-bridge/releases), e.g.:
+
+```bash
+# Linux amd64
+curl -L -o lark-acp-bridge \
+  https://github.com/cyclinder/lark-acp-bridge/releases/latest/download/lark-acp-bridge-linux-amd64
+chmod +x lark-acp-bridge
+sudo mv lark-acp-bridge /usr/local/bin/
+```
+
+Available assets per release (named `lark-acp-bridge-<os>-<arch>`):
+
+| Asset                          | OS      | Arch   |
+|--------------------------------|---------|--------|
+| `lark-acp-bridge-linux-amd64`  | Linux   | amd64  |
+| `lark-acp-bridge-linux-arm64`  | Linux   | arm64  |
+| `lark-acp-bridge-darwin-amd64` | macOS   | amd64  |
+| `lark-acp-bridge-darwin-arm64` | macOS   | arm64  |
+
+Verify the install:
+
+```bash
+lark-acp-bridge help
+```
+
+### Option B: build from source
+
+```bash
+git clone https://github.com/cyclinder/lark-acp-bridge.git
+cd lark-acp-bridge
+go build -o lark-acp-bridge ./cmd/lark-acp-bridge
+```
+
+A development build can also be run directly without producing a binary:
+
+```bash
+go run ./cmd/lark-acp-bridge run
+```
+
+### Releasing
+
+Releases are cut by tagging a commit (e.g. `v1.2.0`) and pushing the tag.
+The release workflow cross-compiles the binaries above and attaches them to
+the GitHub Release so the `releases/latest/download/...` URLs stay stable.
+When publishing a new release, attach the built binaries to the release
+notes so users can `curl` them as shown in Option A.
+
 ## Configuration
 
 Create `~/.lark-acp-bridge/config.json`:
@@ -65,8 +118,58 @@ optional — omit it to disable Codex entirely.
 
 ## Run
 
+The CLI exposes `run`, `status`, `stop`, and `uninstall` subcommands. With no
+subcommand, `run` is assumed (foreground), preserving the original behavior.
+
+### Foreground (default)
+
 ```bash
-go run ./cmd/lark-acp-bridge
+./lark-acp-bridge run
+./lark-acp-bridge run -c /path/to/config.json
+```
+
+### Detached background daemon
+
+```bash
+./lark-acp-bridge run --detach
+```
+
+Spawns the bridge in a new session (survives shell exit), writes a PID file
+and a daemon state file under the bridge home, and redirects stdout/stderr to
+`~/.lark-acp-bridge/logs/daemon-stdout.log`.
+
+### systemd service
+
+```bash
+# system scope (requires root; unit under /etc/systemd/system/)
+sudo ./lark-acp-bridge run --mode systemd
+
+# user scope (unit under ~/.config/systemd/user/; enable lingering so it
+# survives logout: loginctl enable-linger $USER)
+./lark-acp-bridge run --mode systemd --user
+```
+
+This generates a `lark-acp-bridge.service` unit, reloads the manager, and runs
+`systemctl enable --now`. The bridge then runs under systemd with
+`Restart=on-failure`. Override the binary path used in `ExecStart` with
+`--binary /path/to/lark-acp-bridge` if needed.
+
+### Status and stop
+
+```bash
+./lark-acp-bridge status   # shows running state, pid/unit, uptime, config
+./lark-acp-bridge stop     # SIGTERM (process mode) or systemctl stop (systemd)
+```
+
+`status` and `stop` auto-detect the launch mode from the daemon state file
+(`~/.lark-acp-bridge/daemon.json`). Stale state (process gone / unit inactive)
+is cleaned up automatically.
+
+### Remove the systemd unit
+
+```bash
+sudo ./lark-acp-bridge uninstall
+./lark-acp-bridge uninstall --user
 ```
 
 DM the bot directly, or `@bot` in a group. Use `/cd <path>` to set a working

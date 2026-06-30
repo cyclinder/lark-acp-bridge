@@ -45,9 +45,26 @@ output is rendered onto one live Lark card.
 
 - Claude adapter.
 - Access control lists (allowed users / admins / allowed chats).
-- lark-cli identity policy, cloud-doc comments, daemon service management,
-  multi-profile, QR app registration wizard.
+- lark-cli identity policy, cloud-doc comments, multi-profile, QR app
+  registration wizard.
 - Image / file attachment forwarding (design leaves room; not implemented v1).
+
+### v1.2 scope: CLI process management
+
+- The binary is a CLI with `run`, `status`, `stop`, and `uninstall`
+  subcommands (no subcommand defaults to `run` in the foreground).
+- `run --detach` spawns the bridge as a background daemon (new session via
+  `setsid`, PID file + daemon state under the bridge home, stdout/stderr
+  redirected to `logs/daemon-stdout.log`).
+- `run --mode systemd` generates a `lark-acp-bridge.service` unit and runs
+  `systemctl enable --now` (system scope by default, `--user` for the user
+  manager). The unit runs `run --foreground` with `Restart=on-failure`.
+- `status` reports running state, launch mode (process/systemd), pid or unit,
+  uptime, and config path. `stop` sends SIGTERM (process mode) or
+  `systemctl stop` (systemd mode). Both auto-detect the mode from the daemon
+  state file and clean up stale bookkeeping.
+- `internal/daemon` owns the state file (`daemon.json`), PID file
+  (`bridge.pid`), systemd unit rendering/install, and the detached spawn.
 
 ## 2. Non-goals
 
@@ -256,6 +273,10 @@ lark-acp-bridge/
 │   │   └── runstate.go                 # run state machine for streaming card
 │   ├── run/                            # run orchestration
 │   │   └── executor.go                 # RunExecutor: adapter -> events -> card
+│   ├── daemon/                         # CLI process management
+│   │   ├── daemon.go                   # state + PID file + status + stop
+│   │   ├── systemd.go                  # unit file render/install/uninstall
+│   │   └── detach.go                   # detached background spawn
 │   ├── preflight/                      # agent availability checks
 │   │   └── devin.go                    # `devin --version` probe
 │   └── log/                            # structured logging wrapper

@@ -2,6 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Command lark-acp-bridge starts the Feishu/Lark to Devin ACP bridge.
+//
+// Usage:
+//
+//	lark-acp-bridge run [--detach|--mode systemd] [-c config.json]
+//	lark-acp-bridge status
+//	lark-acp-bridge stop
+//	lark-acp-bridge uninstall [--user]
+//
+// `run` with no flags starts the bridge in the foreground. `--detach` spawns
+// it as a background daemon (PID file under the bridge home). `--mode systemd`
+// installs and starts a systemd unit (system scope by default, `--user` for
+// the user manager) then exits; the bridge itself runs under systemd.
+// `status` reports whether the bridge is running and how it was launched.
+// `stop` stops a running bridge (SIGTERM for process mode, `systemctl stop`
+// for systemd mode). `uninstall` removes the systemd unit.
 package main
 
 import (
@@ -21,6 +36,7 @@ import (
 	"github.com/cognition/lark-acp-bridge/internal/chatbind"
 	"github.com/cognition/lark-acp-bridge/internal/commands"
 	"github.com/cognition/lark-acp-bridge/internal/config"
+	"github.com/cognition/lark-acp-bridge/internal/daemon"
 	"github.com/cognition/lark-acp-bridge/internal/intake"
 	"github.com/cognition/lark-acp-bridge/internal/lark"
 	bridgetlog "github.com/cognition/lark-acp-bridge/internal/log"
@@ -32,13 +48,159 @@ import (
 )
 
 func main() {
-	configPath := flag.String("c", "", "path to config file (defaults to ~/.lark-acp-bridge/config.json)")
-	flag.Parse()
-
-	if *configPath != "" {
-		os.Setenv("LARK_ACP_BRIDGE_HOME", strings.TrimSuffix(*configPath, "/config.json"))
+	args := os.Args[1:]
+	cmd := "run"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		cmd = args[0]
+		args = args[1:]
 	}
 
+	switch cmd {
+	case "run":
+		runCmd(args)
+	case "status":
+		statusCmd(args)
+	case "stop":
+		stopCmd(args)
+	case "uninstall":
+		uninstallCmd(args)
+	case "help", "-h", "--help":
+		printUsage()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n", cmd)
+		printUsage()
+		os.Exit(2)
+	}
+}
+
+func printUsage() {
+	fmt.Fprint(os.Stderr, `lark-acp-bridge bridges Feishu/Lark with local CLI coding agents.
+
+Usage:
+  lark-acp-bridge run [--detach|--mode systemd] [--user] [-c config.json]
+  lark-acp-bridge status
+  lark-acp-bridge stop
+  lark-acp-bridge uninstall [--user]
+
+Commands:
+  run          Start the bridge. Default: foreground. --detach: background
+               daemon. --mode systemd: install+start a systemd unit.
+  status       Show whether the bridge is running and how it was launched.
+  stop         Stop a running bridge (SIGTERM or systemctl stop).
+  uninstall    Remove the systemd unit (--user for the user manager).
+
+Run flags:
+  -c PATH      Config file path (defaults to ~/.lark-acp-bridge/config.json).
+  --detach     Run as a background daemon (process mode).
+  --mode MODE  Launch mode: process (default) or systemd.
+  --user       With --mode systemd/uninstall, target the user systemd manager.
+  --binary P   Override the binary path used in the systemd ExecStart.
+  --foreground Internal: run the bridge loop (used by --detach and systemd).
+`)
+}
+
+// runCmd implements the `run` subcommand.
+func runCmd(args []string) {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	configPath := fs.String("c", "", "path to config file (defaults to ~/.lark-acp-bridge/config.json)")
+	detach := fs.Bool("detach", false, "run as a background daemon")
+	mode := fs.String("mode", "process", "launch mode: process or systemd")
+	userScope := fs.Bool("user", false, "target the user systemd manager (systemd mode)")
+	binaryPath := fs.String("binary", "", "override binary path for systemd ExecStart")
+	foreground := fs.Bool("foreground", false, "internal: run the bridge loop directly")
+	_ = fs.Parse(args)
+
+	resolvedConfig := *configPath
+	if resolvedConfig == "" {
+		if envCfg := os.Getenv("LARK_ACP_BRIDGE_CONFIG"); envCfg != "" {
+			resolvedConfig = envCfg
+		}
+	}
+
+	switch *mode {
+	case "systemd":
+		if err := runSystemd(*binaryPath, resolvedConfig, *userScope); err != nil {
+			fmt.Fprintf(os.Stderr, "systemd start failed: %v\n", err)
+			os.Exit(1)
+		}
+	case "process", "":
+		if *detach {
+			if err := runDetach(resolvedConfig); err != nil {
+				fmt.Fprintf(os.Stderr, "detach failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+		runForeground(resolvedConfig, *foreground)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown --mode %q (want process or systemd)\n", *mode)
+		os.Exit(2)
+	}
+}
+
+// runDetach spawns the bridge as a detached background process.
+func runDetach(configPath string) error {
+	if alreadyRunning() {
+		fmt.Fprintln(os.Stderr, "bridge is already running; use `stop` first.")
+		os.Exit(1)
+	}
+	if err := daemon.Detach("", configPath); err != nil {
+		return err
+	}
+	st, _ := daemon.LoadState()
+	if st != nil {
+		fmt.Printf("bridge detached, pid=%d (logs: %s/logs/)\n", st.PID, config.HomeDir())
+	}
+	return nil
+}
+
+// runSystemd installs and starts the systemd unit, then exits.
+func runSystemd(binaryPath, configPath string, userScope bool) error {
+	if binaryPath == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve executable: %w", err)
+		}
+		binaryPath = exe
+	}
+	if configPath == "" {
+		configPath = config.Path()
+	}
+	execStart := binaryPath + " run --foreground -c " + configPath
+	if err := daemon.InstallUnit(userScope, execStart, configPath); err != nil {
+		return err
+	}
+	if err := daemon.SaveState(&daemon.State{
+		Mode:       daemon.ModeSystemd,
+		Unit:       daemon.UnitName,
+		UserScope:  userScope,
+		ConfigPath: configPath,
+		StartedAt:  time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: save daemon state: %v\n", err)
+	}
+	scope := "system"
+	if userScope {
+		scope = "user"
+	}
+	fmt.Printf("bridge installed and started via systemd (%s scope, unit=%s)\n", scope, daemon.UnitName)
+	return nil
+}
+
+// runForeground runs the bridge loop in the foreground. managed is true when
+// the process was launched by a manager (the --detach parent or systemd via
+// the --foreground flag); such processes skip the already-running guard (the
+// launcher already checked) but still record their own daemon state. A direct
+// user invocation (managed=false) guards against double-starts.
+func runForeground(configPath string, managed bool) {
+	if !managed && alreadyRunning() {
+		fmt.Fprintln(os.Stderr, "bridge is already running; use `stop` first.")
+		os.Exit(1)
+	}
+
+	if configPath != "" {
+		os.Setenv("LARK_ACP_BRIDGE_HOME", strings.TrimSuffix(configPath, "/config.json"))
+	}
 	if err := config.EnsureDir(); err != nil {
 		fmt.Fprintf(os.Stderr, "create config dir: %v\n", err)
 		os.Exit(1)
@@ -120,6 +282,11 @@ func main() {
 		return app.handleMessage(msg, batcher)
 	})
 
+	// Record daemon state so status/stop can find this process. The launch
+	// mode is taken from env vars set by the detach/systemd launchers; the
+	// default is plain process mode.
+	recordStart(configPath)
+
 	// Start.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -130,14 +297,152 @@ func main() {
 		<-sigCh
 		bridgetlog.Info("main", "shutdown", "signal received, closing all sessions")
 		closeAllProviders(registry)
+		recordStop()
 		cancel()
 	}()
 
 	bridgetlog.Info("main", "start", "bridge is running")
 	if err := ch.Start(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "channel stopped: %v\n", err)
+		recordStop()
 		os.Exit(1)
 	}
+	recordStop()
+}
+
+// recordStart writes the PID file and daemon state for this foreground
+// process, honoring the managed-by env vars set by the launcher.
+func recordStart(configPath string) {
+	mode, unit, userScope := managedMode()
+	pid := os.Getpid()
+	if err := daemon.WritePID(pid); err != nil {
+		bridgetlog.Warn("main", "pid-write", err.Error())
+	}
+	st := &daemon.State{
+		Mode:       mode,
+		PID:        pid,
+		StartedAt:  time.Now().UTC().Format(time.RFC3339),
+		ConfigPath: configPath,
+	}
+	if mode == daemon.ModeSystemd {
+		st.Unit = unit
+		st.UserScope = userScope
+	}
+	if err := daemon.SaveState(st); err != nil {
+		bridgetlog.Warn("main", "state-write", err.Error())
+	}
+}
+
+// recordStop clears the PID file and daemon state on shutdown.
+func recordStop() {
+	_ = daemon.RemovePID()
+	_ = daemon.ClearState()
+}
+
+// managedMode reads the launcher-provided env vars to determine how this
+// process was launched. Defaults to process mode.
+func managedMode() (daemon.Mode, string, bool) {
+	mode := daemon.ModeProcess
+	if os.Getenv("LARK_ACP_BRIDGE_MANAGED_BY") == "systemd" {
+		mode = daemon.ModeSystemd
+	}
+	unit := os.Getenv("LARK_ACP_BRIDGE_UNIT")
+	userScope := os.Getenv("LARK_ACP_BRIDGE_USER_SCOPE") == "true"
+	return mode, unit, userScope
+}
+
+// alreadyRunning reports whether a live bridge is already recorded.
+func alreadyRunning() bool {
+	st, err := daemon.LoadState()
+	if err != nil || st == nil {
+		return false
+	}
+	switch st.Mode {
+	case daemon.ModeSystemd:
+		out, _ := daemon.Systemctl(st.UserScope, "is-active", st.Unit)
+		return strings.TrimSpace(string(out)) == "active"
+	default:
+		return daemon.Alive(st.PID)
+	}
+}
+
+// statusCmd implements the `status` subcommand.
+func statusCmd(args []string) {
+	_ = flag.NewFlagSet("status", flag.ExitOnError).Parse(args)
+	info, err := daemon.Status()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "status: %v\n", err)
+		os.Exit(1)
+	}
+	if !info.Running {
+		fmt.Println("bridge is not running")
+		if info.Stale {
+			fmt.Println("(stale state was cleaned up)")
+		}
+		return
+	}
+	switch info.Mode {
+	case daemon.ModeSystemd:
+		scope := "system"
+		if info.UserScope {
+			scope = "user"
+		}
+		fmt.Printf("bridge is running (systemd, %s scope, unit=%s, status=%s)\n", scope, info.Unit, info.SystemdActive)
+	default:
+		fmt.Printf("bridge is running (process, pid=%d)\n", info.PID)
+	}
+	if !info.StartedAt.IsZero() {
+		fmt.Printf("started: %s (uptime %s)\n", info.StartedAt.Local().Format(time.RFC3339), roundUptime(info.Uptime))
+	}
+	if info.ConfigPath != "" {
+		fmt.Printf("config: %s\n", info.ConfigPath)
+	}
+}
+
+func roundUptime(d time.Duration) string {
+	if d < time.Minute {
+		return d.Round(time.Second).String()
+	}
+	return d.Round(time.Minute).String()
+}
+
+// stopCmd implements the `stop` subcommand.
+func stopCmd(args []string) {
+	_ = flag.NewFlagSet("stop", flag.ExitOnError).Parse(args)
+	if !alreadyRunning() {
+		// Clean up any stale bookkeeping, then report.
+		_ = daemon.ClearState()
+		_ = daemon.RemovePID()
+		fmt.Println("bridge is not running")
+		return
+	}
+	if err := daemon.Stop(); err != nil {
+		if err == daemon.ErrNotRunning {
+			fmt.Println("bridge is not running")
+			return
+		}
+		fmt.Fprintf(os.Stderr, "stop: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("bridge stopped")
+}
+
+// uninstallCmd implements the `uninstall` subcommand.
+func uninstallCmd(args []string) {
+	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
+	userScope := fs.Bool("user", false, "target the user systemd manager")
+	_ = fs.Parse(args)
+	if err := daemon.UninstallUnit(*userScope); err != nil {
+		fmt.Fprintf(os.Stderr, "uninstall: %v\n", err)
+		os.Exit(1)
+	}
+	_ = daemon.ClearState()
+	_ = daemon.RemovePID()
+	scope := "system"
+	if *userScope {
+		scope = "user"
+	}
+	fmt.Printf("systemd unit removed (%s scope)\n", scope)
 }
 
 // appCtx holds all shared dependencies so the message handler doesn't need
