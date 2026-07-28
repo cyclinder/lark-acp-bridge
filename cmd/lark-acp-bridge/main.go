@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/cognition/lark-acp-bridge/internal/agent/codex"
+	"github.com/cognition/lark-acp-bridge/internal/agent/copilot"
 	"github.com/cognition/lark-acp-bridge/internal/agent/devin"
 	"github.com/cognition/lark-acp-bridge/internal/card"
 	"github.com/cognition/lark-acp-bridge/internal/chatbind"
@@ -554,7 +555,7 @@ func (a *appCtx) startRun(scope, prompt string) {
 	entry, _ := a.sessions.Get(scope)
 	model := entry.Model
 	if model == "" {
-		model = a.cfg.Agent.DefaultModel
+		model = a.cfg.DefaultModelFor(adapter.ID())
 	}
 	sessionID := entry.SessionID
 
@@ -592,9 +593,10 @@ func (a *appCtx) startRun(scope, prompt string) {
 }
 
 // buildRegistry constructs the provider registry from config. Devin is always
-// registered (it is the v1 default). Codex is registered when a `codex` block
-// is present, so `/provider codex` can switch to it even if the codex binary
-// is not yet installed (its absence is reported by /provider, not here).
+// registered (it is the v1 default). Codex and Copilot are registered when
+// their config blocks are present, so `/provider codex` / `/provider copilot`
+// can switch to them even if the binary is not yet installed (its absence is
+// reported by /provider, not here).
 func buildRegistry(cfg *config.Config) *provider.Registry {
 	selection := provider.NewSelection(config.HomeDir())
 	registry := provider.NewRegistry(cfg.DefaultProvider, selection)
@@ -615,12 +617,19 @@ func buildRegistry(cfg *config.Config) *provider.Registry {
 			codex.WithDefaultModel(cfg.Codex.DefaultModel),
 		))
 	}
+	if cfg.Copilot != nil {
+		registry.Register(copilot.New(
+			copilot.WithBinary(cfg.Copilot.Binary),
+			copilot.WithPermissions(cfg.Copilot.Permissions),
+			copilot.WithDefaultModel(cfg.Copilot.DefaultModel),
+		))
+	}
 	return registry
 }
 
 // closeAllProviders shuts down every registered adapter that owns long-lived
-// subprocesses. Devin implements CloseAll; Codex spawns a fresh process per
-// run and has nothing to close.
+// subprocesses. Devin implements CloseAll; Codex and Copilot spawn a fresh
+// process per run and have nothing to close.
 func closeAllProviders(registry *provider.Registry) {
 	for _, e := range registry.List() {
 		if c, ok := registry.Get(e.ID).(interface{ CloseAll() }); ok {

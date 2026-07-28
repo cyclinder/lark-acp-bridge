@@ -2,12 +2,13 @@
 
 A Go bridge that connects Feishu / Lark messenger with local CLI coding
 agents. v1 ships **Devin** (driven through the Agent Client Protocol); v1.1
-adds **Codex** and a `/provider` switch command.
+adds **Codex** and a `/provider` switch command; v1.3 adds **GitHub Copilot**.
 
 ## What it does
 
 - Forwards Feishu / Lark messages to a local agent subprocess (Devin via
-  `devin acp`, or Codex via `codex exec --json`).
+  `devin acp`, Codex via `codex exec --json`, or GitHub Copilot via
+  `copilot -p --output-format json`).
 - Streams agent responses (text, tool calls, usage) onto one live Lark card.
 - Handles slash commands locally (zero token cost): `/help`, `/new`, `/cd`,
   `/ws`, `/open`, `/status`, `/pwd`, `/stop`, `/model`, `/provider`, `/resume`.
@@ -24,6 +25,8 @@ adds **Codex** and a `/provider` switch command.
   default provider.
 - Codex CLI installed (`codex`) — optional; only needed if you enable the
   `codex` config block and want `/provider codex` to work.
+- GitHub Copilot CLI installed (`copilot`) — optional; only needed if you
+  enable the `copilot` config block and want `/provider copilot` to work.
 - A Feishu / Lark app with the bot scope enabled. To use `/open`, the app
   also needs the `im:chat:create` and `im:chat:members:write` scopes so it
   can create groups and add users.
@@ -103,6 +106,11 @@ Create `~/.lark-acp-bridge/config.json`:
     "sandbox": "danger-full-access",
     "defaultModel": ""
   },
+  "copilot": {
+    "binary": "copilot",
+    "permissions": "allow-all",
+    "defaultModel": ""
+  },
   "workspace": {
     "default": "/home/me/projects"
   },
@@ -113,8 +121,16 @@ Create `~/.lark-acp-bridge/config.json`:
 ```
 
 Set `tenant` to `"lark"` for Lark (global) apps. `defaultProvider` defaults
-to `devin`; set it to `codex` to make Codex the default. The `codex` block is
-optional — omit it to disable Codex entirely.
+to `devin`; set it to `codex` or `copilot` to make one of them the default.
+The `codex` and `copilot` blocks are optional — omit them to disable those
+providers entirely.
+
+The `copilot.permissions` field maps onto Copilot CLI approval flags:
+`"allow-all"` (`--allow-all`: tools, paths, URLs — the default),
+`"allow-all-tools"` (`--allow-all-tools`: tools auto-approved, out-of-workspace
+paths still denied), or `"read-only"` (best-effort: `shell`/`edit`/`create`
+denied — Copilot CLI has no kernel sandbox, so this relies on the model
+honoring tool denials).
 
 ## Run
 

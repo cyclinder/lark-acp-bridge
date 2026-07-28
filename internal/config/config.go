@@ -15,15 +15,16 @@ import (
 // Config is the root configuration for the bridge. v1 supports a single
 // profile; multi-profile is deferred to v2.
 type Config struct {
-	App                 App       `json:"app"`
-	Workspace           Workspace `json:"workspace"`
-	Agent               Agent     `json:"agent"`
-	Codex               *Codex    `json:"codex,omitempty"`
-	DefaultProvider     string    `json:"defaultProvider,omitempty"`
-	MaxConcurrentRuns   int       `json:"maxConcurrentRuns"`
-	DebounceMs          int       `json:"debounceMs"`
-	StopGraceMs         int       `json:"stopGraceMs"`
-	IdleTimeoutMinutes  int       `json:"idleTimeoutMinutes"`
+	App                App       `json:"app"`
+	Workspace          Workspace `json:"workspace"`
+	Agent              Agent     `json:"agent"`
+	Codex              *Codex    `json:"codex,omitempty"`
+	Copilot            *Copilot  `json:"copilot,omitempty"`
+	DefaultProvider    string    `json:"defaultProvider,omitempty"`
+	MaxConcurrentRuns  int       `json:"maxConcurrentRuns"`
+	DebounceMs         int       `json:"debounceMs"`
+	StopGraceMs        int       `json:"stopGraceMs"`
+	IdleTimeoutMinutes int       `json:"idleTimeoutMinutes"`
 }
 
 type App struct {
@@ -53,6 +54,25 @@ type Codex struct {
 	DefaultModel string `json:"defaultModel,omitempty"`
 }
 
+// Copilot permission modes map onto Copilot CLI approval flags:
+// "allow-all" (--allow-all: tools, paths, URLs), "allow-all-tools"
+// (--allow-all-tools; out-of-workspace paths still denied), and "read-only"
+// (best-effort: shell/edit/create denied). Copilot CLI has no kernel sandbox,
+// so read-only relies on the model honoring tool denials.
+const (
+	CopilotPermAllowAll      = "allow-all"
+	CopilotPermAllowAllTools = "allow-all-tools"
+	CopilotPermReadOnly      = "read-only"
+)
+
+// Copilot configures the GitHub Copilot provider. When present and the
+// copilot binary is available, `/provider copilot` can switch a chat to it.
+type Copilot struct {
+	Binary       string `json:"binary,omitempty"`
+	Permissions  string `json:"permissions,omitempty"`
+	DefaultModel string `json:"defaultModel,omitempty"`
+}
+
 // Defaults applied when fields are zero.
 func defaults(c *Config) {
 	if c.Agent.Binary == "" {
@@ -70,6 +90,14 @@ func defaults(c *Config) {
 		}
 		if c.Codex.Sandbox == "" {
 			c.Codex.Sandbox = "danger-full-access"
+		}
+	}
+	if c.Copilot != nil {
+		if c.Copilot.Binary == "" {
+			c.Copilot.Binary = "copilot"
+		}
+		if c.Copilot.Permissions == "" {
+			c.Copilot.Permissions = CopilotPermAllowAll
 		}
 	}
 	if c.MaxConcurrentRuns == 0 {
@@ -100,7 +128,31 @@ func (c *Config) Validate() error {
 	if c.App.Tenant != "feishu" && c.App.Tenant != "lark" {
 		return fmt.Errorf("app.tenant must be feishu or lark, got %q", c.App.Tenant)
 	}
+	if c.Copilot != nil {
+		switch c.Copilot.Permissions {
+		case CopilotPermAllowAll, CopilotPermAllowAllTools, CopilotPermReadOnly:
+		default:
+			return fmt.Errorf("copilot.permissions must be %q, %q, or %q, got %q",
+				CopilotPermAllowAll, CopilotPermAllowAllTools, CopilotPermReadOnly, c.Copilot.Permissions)
+		}
+	}
 	return nil
+}
+
+// DefaultModelFor returns the configured default model for a provider id
+// ("" when unset, meaning the agent CLI picks its own default).
+func (c *Config) DefaultModelFor(providerID string) string {
+	switch providerID {
+	case "codex":
+		if c.Codex != nil {
+			return c.Codex.DefaultModel
+		}
+	case "copilot":
+		if c.Copilot != nil {
+			return c.Copilot.DefaultModel
+		}
+	}
+	return c.Agent.DefaultModel
 }
 
 // HomeDir returns the root state directory, honoring

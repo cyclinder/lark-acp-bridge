@@ -66,6 +66,34 @@ output is rendered onto one live Lark card.
 - `internal/daemon` owns the state file (`daemon.json`), PID file
   (`bridge.pid`), systemd unit rendering/install, and the detached spawn.
 
+### v1.3 scope: GitHub Copilot provider
+
+- **GitHub Copilot** provider, driven via `copilot -p --output-format json`
+  (NDJSON event stream over stdout). Like Codex, each run spawns a fresh
+  process; session continuity uses `--resume <sessionId>` on the next spawn,
+  with the id captured from `session.start` or the terminal `result` event.
+- The prompt is passed as the `-p` argument (stdin stays /dev/null — in `-p`
+  mode Copilot reads piped stdin as extra prompt input).
+- Permission flags replace Codex's kernel sandbox: `config.copilot.permissions`
+  is `"allow-all"` (`--allow-all`, the default), `"allow-all-tools"`, or
+  `"read-only"` (best-effort `--deny-tool shell/edit/create`; Copilot CLI has
+  no kernel sandbox). `--no-ask-user` is always passed so the agent never
+  blocks on a question.
+- The translator maps `assistant.message_delta` (with per-messageId suffix
+  tracking so the final `assistant.message` does not re-emit streamed text),
+  `assistant.reasoning_delta`, `assistant.usage`, `tool.execution_start` /
+  `tool.execution_complete`, `session.error`, `abort`, and the terminal
+  top-level `result` event. All other event types are ignored (protocol
+  drift is tolerated).
+- `/model` is dynamic: the adapter implements `commands.ModelLister`,
+  probing `copilot --acp` (initialize + session/new) for the account's real
+  `models.availableModels` table, cached for 10 minutes. The probe consumes
+  no tokens and mirrors the existing `/provider` binary probes; the static
+  `card.FallbackModelsFor("copilot")` table only applies when the probe
+  fails. The displayed default current model prefers the CLI's persisted
+  `~/.copilot/settings.json` `model` (what `copilot -p` actually uses) over
+  the ACP `currentModelId`.
+
 ## 2. Non-goals
 
 - Replacing the upstream TypeScript `lark-coding-agent-bridge`. This is a

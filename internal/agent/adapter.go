@@ -89,6 +89,13 @@ type Event struct {
 	Err        error
 }
 
+// ModelInfo is one selectable model as reported by a provider that can
+// enumerate its real model list (e.g. Copilot via ACP session/new).
+type ModelInfo struct {
+	Value string
+	Name  string
+}
+
 // StopReason values mirrored from ACP for convenience.
 const (
 	StopEndTurn         = "end_turn"

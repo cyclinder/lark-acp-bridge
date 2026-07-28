@@ -4,9 +4,11 @@
 package commands
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/cognition/lark-acp-bridge/internal/agent"
 	"github.com/cognition/lark-acp-bridge/internal/card"
 	"github.com/cognition/lark-acp-bridge/internal/config"
 	"github.com/cognition/lark-acp-bridge/internal/run"
@@ -184,6 +186,67 @@ func TestTryDispatchModelByIndex(t *testing.T) {
 	fs := ctx.Sender.(*fakeSender)
 	if len(fs.markdowns) != 1 {
 		t.Fatalf("expected 1 reply, got %d", len(fs.markdowns))
+	}
+}
+
+// fakeModelListAdapter also implements ModelLister with a dynamic list that
+// shares nothing with the fallback tables.
+type fakeModelListAdapter struct{ fakeAdapter }
+
+func (a *fakeModelListAdapter) ListModels(_ context.Context) ([]agent.ModelInfo, string, error) {
+	return []agent.ModelInfo{
+		{Value: "claude-fable-5", Name: "Claude Fable 5"},
+		{Value: "gpt-5.6-sol", Name: "GPT-5.6 Sol"},
+	}, "claude-fable-5", nil
+}
+
+func TestHandleModelUsesDynamicList(t *testing.T) {
+	ctx := newTestContext(t)
+	ctx.Adapter = &fakeModelListAdapter{fakeAdapter{name: "GitHub Copilot"}}
+	// A model absent from every fallback table must be accepted when the
+	// provider reports it dynamically.
+	handled, err := TryDispatch("/model gpt-5.6-sol", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /model gpt-5.6-sol = (%v, %v), want (true, nil)", handled, err)
+	}
+	entry, ok := ctx.Sessions.Get(ctx.Scope)
+	if !ok || entry.Model != "gpt-5.6-sol" {
+		t.Fatalf("stashed model = %+v, want gpt-5.6-sol", entry)
+	}
+}
+
+func TestHandleModelsShowsProviderDefault(t *testing.T) {
+	ctx := newTestContext(t)
+	ctx.Adapter = &fakeModelListAdapter{fakeAdapter{name: "GitHub Copilot"}}
+	handled, err := TryDispatch("/model", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /model = (%v, %v), want (true, nil)", handled, err)
+	}
+	fs := ctx.Sender.(*fakeSender)
+	if len(fs.cards) != 1 {
+		t.Fatalf("expected 1 model card, got %d", len(fs.cards))
+	}
+}
+
+func TestTryDispatchModelStashesChoiceAndClearsSession(t *testing.T) {
+	ctx := newTestContext(t)
+	if err := ctx.Sessions.Set(ctx.Scope, session.Entry{SessionID: "sess_old", Cwd: "/tmp"}); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	handled, err := TryDispatch("/model 2", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /model 2 = (%v, %v), want (true, nil)", handled, err)
+	}
+	entry, ok := ctx.Sessions.Get(ctx.Scope)
+	if !ok {
+		t.Fatal("session entry should survive the switch (it holds the stashed model)")
+	}
+	// Index 2 in the fallback (Devin) table.
+	if entry.Model != "claude-sonnet-4-6" {
+		t.Errorf("stashed model = %q, want claude-sonnet-4-6", entry.Model)
+	}
+	if entry.SessionID != "" {
+		t.Errorf("session id should be cleared, got %q", entry.SessionID)
 	}
 }
 

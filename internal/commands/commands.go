@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cognition/lark-acp-bridge/internal/agent"
 	"github.com/cognition/lark-acp-bridge/internal/card"
 	"github.com/cognition/lark-acp-bridge/internal/chatbind"
 	"github.com/cognition/lark-acp-bridge/internal/config"
@@ -46,6 +47,14 @@ type SessionCloser interface {
 // active session, caller should stash for next spawn.
 type ModelSwitcher interface {
 	SetModel(ctx context.Context, scope, model string) (bool, error)
+}
+
+// ModelLister enumerates the provider's real, account-specific model list
+// on demand (e.g. Copilot via `copilot --acp`). The string is the provider's
+// own default model id, used to show the actual "current" when neither the
+// session nor the config pins one.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]agent.ModelInfo, string, error)
 }
 
 // ChatAdmin performs the Feishu group operations that /open needs. It is a
@@ -240,17 +249,45 @@ func handleHelp(_ string, ctx *Context) error {
 	return sendCard(ctx, c)
 }
 
-func handleModels(_ string, ctx *Context) error {
-	models := ctx.ModelList
-	if len(models) == 0 {
-		models = card.FallbackModels
+// modelChoices returns the model table for the current scope: the cached
+// dynamic list when present, else the provider's own list when it can
+// enumerate one, else the built-in fallback table. The second return value
+// is the provider's reported default model id ("" when unknown).
+func modelChoices(ctx *Context) ([]card.ModelEntry, string) {
+	if len(ctx.ModelList) > 0 {
+		return ctx.ModelList, ""
 	}
+	if ml, ok := ctx.Adapter.(ModelLister); ok {
+		if listed, currentID, err := ml.ListModels(context.Background()); err == nil && len(listed) > 0 {
+			entries := make([]card.ModelEntry, 0, len(listed))
+			for _, m := range listed {
+				entries = append(entries, card.ModelEntry{Value: m.Value, Name: m.Name})
+			}
+			return entries, currentID
+		}
+	}
+	return card.FallbackModelsFor(providerID(ctx)), ""
+}
+
+// providerID returns the current adapter's provider id, "" when unknown.
+func providerID(ctx *Context) string {
+	if ctx.Adapter == nil {
+		return ""
+	}
+	return ctx.Adapter.ID()
+}
+
+func handleModels(_ string, ctx *Context) error {
+	models, providerDefault := modelChoices(ctx)
 	current := ""
 	if entry, ok := ctx.Sessions.Get(ctx.Scope); ok {
 		current = entry.Model
 	}
 	if current == "" {
-		current = ctx.Config.Agent.DefaultModel
+		current = ctx.Config.DefaultModelFor(providerID(ctx))
+	}
+	if current == "" {
+		current = providerDefault
 	}
 	return sendCard(ctx, card.ModelsCard(models, current))
 }
@@ -260,10 +297,7 @@ func handleModel(args string, ctx *Context) error {
 	if input == "" {
 		return handleModels("", ctx)
 	}
-	models := ctx.ModelList
-	if len(models) == 0 {
-		models = card.FallbackModels
-	}
+	models, _ := modelChoices(ctx)
 	// Resolve input: either a sequence number or a model value.
 	var chosen string
 	if n, err := strconv.Atoi(input); err == nil && n >= 1 && n <= len(models) {
@@ -293,13 +327,14 @@ func handleModel(args string, ctx *Context) error {
 			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Switched model to `%s` (session preserved).", chosen), ctx.MessageID)
 		}
 	}
-	// No active session: stash for next spawn, clear session mapping.
+	// No active session: stash the choice for the next spawn and clear the
+	// session mapping (context is not portable across models). The entry is
+	// replaced rather than Clear()ed so the stashed model survives.
 	ctx.Active.Interrupt(ctx.Scope)
-	if err := ctx.Sessions.SetModel(ctx.Scope, chosen); err != nil {
+	if err := ctx.Sessions.Set(ctx.Scope, session.Entry{Model: chosen}); err != nil {
 		return err
 	}
-	_ = ctx.Sessions.Clear(ctx.Scope)
-	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Switched model to `%s` (will apply on next run).", chosen), ctx.MessageID)
+	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Switched model to `%s` (session cleared; will apply on next run).", chosen), ctx.MessageID)
 }
 
 func sendCard(ctx *Context, c card.Card) error {

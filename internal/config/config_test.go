@@ -36,6 +36,50 @@ func TestValidateMissingApp(t *testing.T) {
 	}
 }
 
+func TestCopilotDefaults(t *testing.T) {
+	c := &Config{App: App{ID: "cli_x", Secret: "s"}, Copilot: &Copilot{}}
+	defaults(c)
+	if c.Copilot.Binary != "copilot" {
+		t.Errorf("copilot.binary = %q, want copilot", c.Copilot.Binary)
+	}
+	if c.Copilot.Permissions != CopilotPermAllowAll {
+		t.Errorf("copilot.permissions = %q, want %q", c.Copilot.Permissions, CopilotPermAllowAll)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+}
+
+func TestCopilotValidateRejectsUnknownPermissions(t *testing.T) {
+	c := &Config{App: App{ID: "cli_x", Secret: "s"}, Copilot: &Copilot{Permissions: "yolo"}}
+	defaults(c)
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error for unknown copilot.permissions")
+	}
+}
+
+func TestDefaultModelFor(t *testing.T) {
+	c := &Config{
+		Agent:   Agent{DefaultModel: "devin-model"},
+		Codex:   &Codex{DefaultModel: "codex-model"},
+		Copilot: &Copilot{DefaultModel: "copilot-model"},
+	}
+	if got := c.DefaultModelFor("devin"); got != "devin-model" {
+		t.Errorf("devin = %q", got)
+	}
+	if got := c.DefaultModelFor("codex"); got != "codex-model" {
+		t.Errorf("codex = %q", got)
+	}
+	if got := c.DefaultModelFor("copilot"); got != "copilot-model" {
+		t.Errorf("copilot = %q", got)
+	}
+	// Missing provider blocks fall back to the devin (Agent) model.
+	c2 := &Config{Agent: Agent{DefaultModel: "devin-model"}}
+	if got := c2.DefaultModelFor("copilot"); got != "devin-model" {
+		t.Errorf("copilot without block = %q, want devin-model", got)
+	}
+}
+
 func TestLoadSaveRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LARK_ACP_BRIDGE_HOME", dir)

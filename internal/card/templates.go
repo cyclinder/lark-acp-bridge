@@ -246,6 +246,39 @@ var FallbackModels = []ModelEntry{
 	{Value: "kimi-k2-7", Name: "Kimi K2.7"},
 }
 
+// fallbackCodexModels lists common Codex CLI model ids.
+var fallbackCodexModels = []ModelEntry{
+	{Value: "gpt-5", Name: "GPT-5"},
+	{Value: "gpt-5-codex", Name: "GPT-5 Codex"},
+	{Value: "codex-mini-latest", Name: "Codex Mini"},
+	{Value: "o3", Name: "o3"},
+	{Value: "o4-mini", Name: "o4-mini"},
+}
+
+// fallbackCopilotModels lists common GitHub Copilot CLI model ids.
+var fallbackCopilotModels = []ModelEntry{
+	{Value: "claude-sonnet-4.5", Name: "Claude Sonnet 4.5"},
+	{Value: "claude-opus-4.5", Name: "Claude Opus 4.5"},
+	{Value: "claude-haiku-4.5", Name: "Claude Haiku 4.5"},
+	{Value: "gpt-5", Name: "GPT-5"},
+	{Value: "gpt-4.1", Name: "GPT-4.1"},
+	{Value: "gemini-2.5-pro", Name: "Gemini 2.5 Pro"},
+}
+
+// FallbackModelsFor returns the built-in model table for a provider, used
+// when the agent does not expose a dynamic model list. Unknown providers
+// fall back to the Devin table for backward compatibility.
+func FallbackModelsFor(providerID string) []ModelEntry {
+	switch providerID {
+	case "codex":
+		return fallbackCodexModels
+	case "copilot":
+		return fallbackCopilotModels
+	default:
+		return FallbackModels
+	}
+}
+
 // --- workspaces card ------------------------------------------------------
 
 // WorkspaceEntry is one named alias row in the /ws card.
