@@ -27,9 +27,91 @@ adds **Codex** and a `/provider` switch command; v1.3 adds **GitHub Copilot**.
   `codex` config block and want `/provider codex` to work.
 - GitHub Copilot CLI installed (`copilot`) — optional; only needed if you
   enable the `copilot` config block and want `/provider copilot` to work.
-- A Feishu / Lark app with the bot scope enabled. To use `/open`, the app
-  also needs the `im:chat:create` and `im:chat:members:write` scopes so it
-  can create groups and add users.
+- A Feishu / Lark **self-built app** with the bot capability enabled and the
+  permissions / event subscription below. The bridge talks to Feishu over a
+  WebSocket long connection, so no public IP, domain, or webhook URL is
+  needed — the bridge dials out to Feishu.
+
+## Feishu / Lark app setup
+
+The bridge connects as a self-built app over the SDK long-connection
+(WebSocket) channel, so you do NOT need a public endpoint or webhook. You only
+need to create an app, enable the bot, grant a few permissions, and subscribe
+to one event.
+
+### 1. Create a self-built app
+
+1. Open the [Feishu Developer Console](https://open.feishu.cn/app) (Feishu)
+   or [Lark Developer Console](https://open.larksuite.com/app) (Lark global).
+2. Click **Create custom app** (创建企业自建应用), fill in a name and
+   description, and create the app.
+3. Note the **App ID** (`cli_xxxxxxxxxxxx`) and **App Secret** on the
+   **Credentials & Basic Info** (凭证与基础信息) page — these go into
+   `config.json` as `app.id` and `app.secret`.
+
+### 2. Enable the bot capability
+
+On the app's **Capabilities** (应用能力) page, add the **Bot** (机器人)
+capability. This is what lets the app receive and send IM messages. Without
+it, the long connection has nothing to deliver.
+
+### 3. Grant permissions
+
+On **Permissions & Scopes** (权限管理) → **API Permissions**, add these
+scopes. The first four are required for the core bridge; the last two are
+only needed for `/open` (creating groups and adding members).
+
+| Scope | Why |
+|---|---|
+| `im:message:send_as_bot` | Send messages / cards as the bot |
+| `im:message.p2p_msg:readonly` | Receive DM (p2p) messages from users |
+| `im:message.group_at_msg:readonly` | Receive group messages that @mention the bot |
+| `im:message.reaction:write` | Add the "typing" reaction to acknowledge a user message |
+| `im:chat:create` | `/open`: create a group bound to a working directory |
+| `im:chat:members:write` | `/open`: add users to the created group |
+
+After adding scopes, click **Publish version** (创建版本) and have your
+tenant admin **approve** it (or, for a personal test app, approve it
+yourself if you are the admin). Scopes only take effect once a version is
+approved and released.
+
+### 4. Subscribe to the receive-message event
+
+On **Event Subscriptions** (事件与回调) → **Event Configuration**:
+
+1. Set **Subscription mode** (订阅方式) to **Receive events via long
+   connection** (使用长连接接收事件). This is the WebSocket mode the bridge
+   uses; no request URL is needed.
+2. Under **Added events**, add **Receive message (im.message.receive_v1)**
+   (接收消息 v2.0). This is the only event the bridge needs.
+
+> The long-connection mode is only available for self-built apps, which is
+> exactly what this bridge uses. The SDK handles authentication on connect;
+> events arrive as plaintext over the WebSocket.
+
+### 5. Set the app's availability range
+
+On **App Release** (版本发布与发布) → **Availability** (可用范围), add
+yourself (or the users / departments who should be able to DM the bot). Then
+**Create version** → **Submit for review** → **Approve**. Once approved, the
+bot is reachable in Feishu / Lark: search for it by name to start a DM, or
+add it to a group and @mention it.
+
+### 6. Put the credentials in config
+
+```json
+{
+  "app": {
+    "id": "cli_xxxxxxxxxxxx",
+    "secret": "your_app_secret",
+    "tenant": "feishu"
+  },
+  ...
+}
+```
+
+Set `tenant` to `"lark"` instead of `"feishu"` if your app is on the Lark
+(global) tenant.
 
 ## Install
 
@@ -188,27 +270,44 @@ sudo ./lark-acp-bridge uninstall
 ./lark-acp-bridge uninstall --user
 ```
 
-DM the bot directly, or `@bot` in a group. Use `/cd <path>` to set a working
-directory, then send any message to start a run with the effective provider.
+## Quick start (first run)
+
+Once the app is approved and the bridge is running, the typical first-run
+flow is:
+
+1. In Feishu / Lark, search for the bot by name and start a DM (or add it
+   to a group and @mention it).
+2. Send `/cd /path/to/your/project` to bind the chat to a working
+   directory. The agent runs there; session state is scoped to this chat.
+3. Send `/status` to confirm the cwd, provider, and model.
+4. Send any plain message — it is forwarded to the agent as a prompt. The
+   reply streams onto one live card (text + tool calls + usage).
+5. Use `/stop` to cancel a run mid-turn, `/new` to reset the session, and
+   `/help` to see all commands.
+
+In a group, the bot only responds when @mentioned. In a DM, every plain
+message is a prompt. Slash commands are handled locally and never cost
+tokens; only plain messages reach the agent.
 
 ## Slash commands
 
+All commands are handled locally by the bridge — they never invoke the
+agent subprocess and never consume tokens.
+
 | Command | Effect |
 |---|---|
-| `/help` | Dynamic help card (bridge + agent commands) |
-| `/new` `/reset` | Clear the current chat session |
-| `/cd <path>` | Switch working directory (resets session) |
-| `/ws` | Manage named workspace aliases (`/ws save\|use\|remove <name>`) |
-| `/open [path]` | Create/reuse a group bound to a cwd (p2p only) |
-| `/status` | Show current state |
+| `/help` | Dynamic help card: bridge commands always, agent-specific commands only when a provider is selected |
+| `/new` `/reset` | Clear the current chat session (context is dropped; the agent process is reaped) |
+| `/cd <path>` | Switch working directory for this chat (resets the session) |
+| `/ws` | Manage named workspace aliases: `/ws save <name>`, `/ws use <name>`, `/ws remove <name>` |
+| `/open [path]` | Create (or reuse) a Feishu group bound to a cwd; p2p only |
+| `/status` | Show current scope, cwd, session, provider, model, and active-run state |
 | `/pwd` | Print the current working directory |
-| `/stop` | Stop the active run |
-| `/model` | List available models (current marked) |
-| `/model <N\|name>` | Switch model (resets session) |
-| `/provider` | List providers; `/provider <id>` switches, `/provider default` reverts |
-| `/resume` | List and resume past sessions |
-
-All commands are handled locally and never invoke the agent subprocess.
+| `/stop` | Stop the active run for this chat |
+| `/model` | List available models with the current one marked |
+| `/model <N\|name>` | Switch model (resets the session); `<N>` is the list index from `/model` |
+| `/provider` | List registered providers; `/provider <id>` overrides the default per chat, `/provider default` reverts (switching clears the session) |
+| `/resume` | List past sessions and resume one with `/resume <N>` |
 
 ## Architecture
 
