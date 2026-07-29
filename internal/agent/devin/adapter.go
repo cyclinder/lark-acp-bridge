@@ -569,7 +569,10 @@ func mapEvent(ev acp.Event) agent.Event {
 	case acp.EventKindText:
 		return agent.Event{Type: agent.EventText, Delta: ev.Text}
 	case acp.EventKindPlan:
-		return agent.Event{Type: agent.EventThinking, Delta: ev.Text}
+		// Devin emits the FULL plan (all steps + statuses) on every plan
+		// event, not a delta. Mark as snapshot so the card reducer
+		// replaces instead of appending.
+		return agent.Event{Type: agent.EventThinking, Delta: ev.Text, Snapshot: true}
 	case acp.EventKindToolStart:
 		return agent.Event{Type: agent.EventToolUse, ToolID: ev.ToolID, ToolName: ev.ToolTitle, ToolInput: ev.ToolInput}
 	case acp.EventKindToolUpdate:

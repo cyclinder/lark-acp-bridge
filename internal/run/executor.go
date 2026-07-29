@@ -10,11 +10,13 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/cognition/lark-acp-bridge/internal/agent"
 	"github.com/cognition/lark-acp-bridge/internal/card"
+	bridgetlog "github.com/cognition/lark-acp-bridge/internal/log"
 	larktypes "github.com/larksuite/oapi-sdk-go/v3/channel/types"
 )
 
@@ -115,8 +117,10 @@ func (e *Executor) Execute(ctx context.Context, in ExecuteInput) error {
 		Model: in.Model, SessionID: in.SessionID,
 	})
 	if err != nil {
+		bridgetlog.Error("run", "adapter-run", fmt.Sprintf("scope=%s err=%v", in.Scope, err))
 		return err
 	}
+	bridgetlog.Info("run", "adapter-started", fmt.Sprintf("scope=%s", in.Scope))
 	h := &Handle{run: agentRun, cancel: cancel}
 	if prev := e.active.Set(in.Scope, h); prev != nil {
 		_ = prev.run.Stop()
@@ -126,8 +130,11 @@ func (e *Executor) Execute(ctx context.Context, in ExecuteInput) error {
 
 	// Open a streaming card with the initial running state.
 	state := card.NewRunState()
+	bridgetlog.Info("run", "stream-prep", fmt.Sprintf("scope=%s chat=%s", in.Scope, in.ChatID))
 	ctrl, _, err := e.sender.StreamCard(ctx, in.ChatID, state.Render())
+	bridgetlog.Info("run", "stream-result", fmt.Sprintf("scope=%s err=%v", in.Scope, err))
 	if err != nil {
+		bridgetlog.Error("run", "stream-open", fmt.Sprintf("scope=%s chat=%s err=%v", in.Scope, in.ChatID, err))
 		// If the stream open fails, still drain the run so the agent
 		// process does not leak; events just go nowhere.
 		drainAndNotify(agentRun, in)
@@ -146,9 +153,12 @@ func (e *Executor) Execute(ctx context.Context, in ExecuteInput) error {
 		}
 		cardJSON, err := json.Marshal(state.Render())
 		if err != nil {
+			bridgetlog.Error("run", "render-marshal", fmt.Sprintf("scope=%s err=%v", in.Scope, err))
 			return
 		}
-		_ = ctrl.UpdateCard(ctx, string(cardJSON))
+		if uerr := ctrl.UpdateCard(ctx, string(cardJSON)); uerr != nil {
+			bridgetlog.Error("run", "card-update", fmt.Sprintf("scope=%s err=%v len=%d", in.Scope, uerr, len(cardJSON)))
+		}
 		lastUpdate = time.Now()
 	}
 

@@ -71,6 +71,14 @@ type Event struct {
 	// EventText, EventThinking
 	Delta string
 
+	// Snapshot applies to EventThinking only. True means Delta is a full
+	// plan/reasoning snapshot that replaces the current one (Devin ACP
+	// emits the entire plan on every update). False means Delta is an
+	// incremental reasoning chunk that is appended (Copilot
+	// assistant.reasoning_delta). The card reducer branches on this so
+	// both providers render a coherent reasoning region.
+	Snapshot bool
+
 	// EventToolUse, EventToolResult
 	ToolID    string
 	ToolName  string

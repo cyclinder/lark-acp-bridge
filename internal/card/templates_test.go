@@ -59,6 +59,87 @@ func TestRunStateCancelledTransition(t *testing.T) {
 	}
 }
 
+// TestRenderToolBody asserts the tool panel body surfaces the labeled input
+// (Command/File/Pattern/URL/Query) plus the output/error block, for both
+// Devin-style (command_execution) and Copilot/Codex-style (Bash/Read/...)
+// tool names.
+func TestRenderToolBody(t *testing.T) {
+	cases := []struct {
+		name   string
+		tool   toolEntry
+		wantIn string
+	}{
+		{
+			name: "command_execution with output",
+			tool: toolEntry{
+				name:   "command_execution",
+				input:  json.RawMessage(`{"command":"ls -la"}`),
+				output: "file.txt",
+				status: "done",
+			},
+			wantIn: "**Command**",
+		},
+		{
+			name: "Bash error shows Error label",
+			tool: toolEntry{
+				name:   "Bash",
+				input:  json.RawMessage(`{"command":"git status"}`),
+				output: "fatal: not a repo",
+				status: "failed",
+			},
+			wantIn: "**Error**",
+		},
+		{
+			name: "Read shows File",
+			tool: toolEntry{
+				name:   "Read",
+				input:  json.RawMessage(`{"file_path":"/a/b/c.go"}`),
+				status: "done",
+			},
+			wantIn: "**File** `/a/b/c.go`",
+		},
+		{
+			name: "Grep shows Pattern and Path",
+			tool: toolEntry{
+				name:   "Grep",
+				input:  json.RawMessage(`{"pattern":"foo","path":"src"}`),
+				status: "running",
+			},
+			wantIn: "**Pattern** `foo`",
+		},
+		{
+			name: "running no output shows running marker",
+			tool: toolEntry{
+				name:   "Bash",
+				input:  json.RawMessage(`{"command":"sleep 1"}`),
+				status: "running",
+			},
+			wantIn: "_running..._",
+		},
+		{
+			name: "terminal no input no output shows no-output marker",
+			tool: toolEntry{name: "unknown", status: "done"},
+			wantIn: "_no output_",
+		},
+	}
+	for _, c := range cases {
+		got := renderToolBody(c.tool)
+		if !strings.Contains(got, c.wantIn) {
+			t.Errorf("%s: renderToolBody = %q, want to contain %q", c.name, got, c.wantIn)
+		}
+	}
+}
+
+// TestRenderToolBodyOutputCap asserts a huge output is bounded so the panel
+// cannot push the card past Feishu's per-element size limit.
+func TestRenderToolBodyOutputCap(t *testing.T) {
+	big := strings.Repeat("x", outputMax*4)
+	got := renderToolBody(toolEntry{name: "Bash", output: big, status: "done"})
+	if len(got) > bodyTotalMax+64 {
+		t.Errorf("body not bounded: %d bytes", len(got))
+	}
+}
+
 func TestRunStateToolTracking(t *testing.T) {
 	s := NewRunState()
 	s.Reduce(agent.Event{Type: agent.EventToolUse, ToolID: "t1", ToolName: "ls"})
@@ -93,7 +174,7 @@ func TestRunStateHeaderReflectsPhase(t *testing.T) {
 		t.Errorf("writing header = %q, want to contain Writing response", got)
 	}
 
-	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "step 1"})
+	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "step 1", Snapshot: true})
 	if got := s.Render().Header.Title.Content; !strings.Contains(got, "Planning") {
 		t.Errorf("planning header = %q, want to contain Planning", got)
 	}
@@ -197,15 +278,47 @@ func TestRunStateToolCollapse(t *testing.T) {
 	}
 }
 
-// TestRunStatePlanReplacedNotAppended asserts that consecutive plan events
-// replace the plan snapshot instead of stacking copies (Devin emits the full
-// plan on every update).
+// TestRunStatePlanReplacedNotAppended asserts that consecutive plan SNAPSHOT
+// events (Devin ACP, which emits the full plan on every update) replace the
+// plan text instead of stacking copies.
 func TestRunStatePlanReplacedNotAppended(t *testing.T) {
 	s := NewRunState()
-	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "step A"})
-	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "step B"})
+	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "step A", Snapshot: true})
+	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "step B", Snapshot: true})
 	if s.planText != "step B" {
-		t.Errorf("planText = %q, want %q (should replace not append)", s.planText, "step B")
+		t.Errorf("planText = %q, want %q (snapshot should replace not append)", s.planText, "step B")
+	}
+}
+
+// TestRunStateReasoningDeltaAccumulated asserts that reasoning DELTA events
+// (Copilot assistant.reasoning_delta) are appended, not replaced — the bug
+// being that the old reducer treated every thinking event as a snapshot, so
+// only the last chunk survived.
+func TestRunStateReasoningDeltaAccumulated(t *testing.T) {
+	s := NewRunState()
+	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "alpha "})
+	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "beta "})
+	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "gamma"})
+	if s.planText != "alpha beta gamma" {
+		t.Errorf("planText = %q, want %q (delta should accumulate)", s.planText, "alpha beta gamma")
+	}
+}
+
+// TestRunStateReasoningDeltaTailCap asserts a long reasoning delta stream is
+// bounded, keeping the tail (most recent reasoning) with a truncation marker.
+func TestRunStateReasoningDeltaTailCap(t *testing.T) {
+	s := NewRunState()
+	var big strings.Builder
+	for i := 0; i < maxPlanRunes*2; i++ {
+		big.WriteByte('y')
+	}
+	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: big.String()})
+	s.Reduce(agent.Event{Type: agent.EventThinking, Delta: "TAIL"})
+	if !strings.Contains(s.planText, "TAIL") {
+		t.Error("tail reasoning was dropped; expected most recent chunk kept")
+	}
+	if !s.planDropped {
+		t.Error("expected planDropped=true after truncation")
 	}
 }
 

@@ -42,16 +42,16 @@ type CardText struct {
 // they are visually distinct from the agent's prose and don't rely on
 // lark_md's limited blockquote/code-fence support).
 type Element struct {
-	Tag            string    `json:"tag"`
-	Content        string    `json:"content,omitempty"`
-	Text           *CardText `json:"text,omitempty"`
-	Elements       []Element `json:"elements,omitempty"`
-	Expanded       bool      `json:"expanded,omitempty"`
-	Header         *PanelHeader `json:"header,omitempty"`
-	Border         *PanelBorder `json:"border,omitempty"`
-	VerticalSpacing string   `json:"vertical_spacing,omitempty"`
-	Padding        string    `json:"padding,omitempty"`
-	TextSize       string    `json:"text_size,omitempty"`
+	Tag             string    `json:"tag"`
+	Content         string    `json:"content,omitempty"`
+	Text            *CardText `json:"text,omitempty"`
+	Elements        []Element `json:"elements,omitempty"`
+	Expanded        bool      `json:"expanded,omitempty"`
+	Header          *PanelHeader `json:"header,omitempty"`
+	Border          *PanelBorder `json:"border,omitempty"`
+	VerticalSpacing string    `json:"vertical_spacing,omitempty"`
+	Padding         string    `json:"padding,omitempty"`
+	TextSize        string    `json:"text_size,omitempty"`
 }
 
 // PanelHeader is the header of a collapsible_panel.
@@ -471,6 +471,7 @@ type toolEntry struct {
 	name    string
 	summary string // one-line input summary (command, file path, etc.)
 	status  string // running | done | failed | cancelled
+	input   json.RawMessage
 	output  string
 }
 
@@ -512,16 +513,29 @@ func (s *RunState) Reduce(ev agent.Event) {
 		s.phase = phaseWriting
 		s.lastActivity = "writing"
 	case agent.EventThinking:
-		// Devin emits the FULL plan (all steps + statuses) on every plan
-		// event, not a delta. Replacing keeps the current snapshot only;
-		// appending would stack N copies of the whole plan.
-		if len([]rune(s.planText)) > maxPlanRunes && len([]rune(ev.Delta)) <= maxPlanRunes {
-			s.planDropped = true
-		}
-		s.planText = ev.Delta
-		if r := len([]rune(s.planText)); r > maxPlanRunes {
-			s.planText = string([]rune(s.planText)[r-maxPlanRunes:])
-			s.planDropped = true
+		// Two reasoning styles share this event:
+		//   - Snapshot (Devin ACP plan): ev.Delta is the FULL plan on
+		//     every event. Replace so the panel always shows the current
+		//     snapshot; appending would stack N copies of the whole plan.
+		//   - Delta (Copilot assistant.reasoning_delta): ev.Delta is one
+		//     incremental chunk. Append, with the same tail cap as text so
+		//     a long reasoning stream stays bounded.
+		if ev.Snapshot {
+			if len([]rune(s.planText)) > maxPlanRunes && len([]rune(ev.Delta)) <= maxPlanRunes {
+				s.planDropped = true
+			}
+			s.planText = ev.Delta
+			if r := len([]rune(s.planText)); r > maxPlanRunes {
+				s.planText = string([]rune(s.planText)[r-maxPlanRunes:])
+				s.planDropped = true
+			}
+		} else {
+			if s.planText == "" {
+				s.planText = ev.Delta
+			} else {
+				s.planText += ev.Delta
+			}
+			s.planText = trimTailString(s.planText, maxPlanRunes, &s.planDropped)
 		}
 		s.phase = phasePlanning
 		s.lastActivity = "planning"
@@ -532,6 +546,7 @@ func (s *RunState) Reduce(ev agent.Event) {
 				id:      ev.ToolID,
 				name:    ev.ToolName,
 				summary: summarizeToolInput(ev.ToolName, ev.ToolInput),
+				input:   ev.ToolInput,
 				status:  "running",
 			},
 		})
@@ -702,17 +717,13 @@ func (s *RunState) Render() Card {
 			// Tool call as a collapsible panel. Expanded while running so
 			// the user sees live status; collapsed when done to keep the
 			// card compact. The header carries the status icon + tool name
-			// + input summary; the body carries the output preview.
+			// + input summary; the body carries the labeled input + output
+			// preview (see renderToolBody).
 			title := toolIcon(t.status) + " **" + t.name + "**"
 			if t.summary != "" {
 				title += " — " + t.summary
 			}
-			body := ""
-			if t.output != "" {
-				body = "```\n" + truncate(t.output, 200) + "\n```"
-			} else if t.status == "running" {
-				body = "_running..._"
-			}
+			body := renderToolBody(t)
 			expanded := t.status == "running"
 			borderColor := ""
 			switch t.status {
@@ -835,6 +846,103 @@ func statusLabel(s runStatus) string {
 	return "unknown"
 }
 
+// Caps for the per-tool body region. Even with the header summary, a single
+// tool with a huge command or long output can push the panel past Feishu's
+// per-element size limit (~30KB); these keep one panel bounded.
+const (
+	// bodyFieldMax caps a single labeled input field (command, query, ...).
+	bodyFieldMax = 600
+	// outputMax caps the rendered output/error block of one tool.
+	outputMax = 1200
+	// bodyTotalMax is the cumulative cap on a tool's full body markdown
+	// (input + output + fences + labels). The last belt across the whole
+	// rendered body string.
+	bodyTotalMax = 2500
+)
+
+// renderToolBody builds the body markdown for one tool call panel: a labeled
+// input section (Command/File/Pattern/URL/Query) followed by the output or
+// error block. Mirrors the reference TS renderer so the user can see what
+// the tool operated on, not just its name. Tolerates missing/empty input.
+func renderToolBody(t toolEntry) string {
+	var parts []string
+	if in := renderToolInput(t.name, t.input); in != "" {
+		parts = append(parts, in)
+	}
+	switch {
+	case t.output != "":
+		label := "Output"
+		if t.status == "failed" {
+			label = "Error"
+		}
+		parts = append(parts, fmt.Sprintf("**%s**\n```\n%s\n```", label, truncate(t.output, outputMax)))
+	case t.status == "running":
+		parts = append(parts, "_running..._")
+	}
+	if len(parts) == 0 {
+		return "_no output_"
+	}
+	body := strings.Join(parts, "\n\n")
+	if len(body) <= bodyTotalMax {
+		return body
+	}
+	return truncate(body, bodyTotalMax) + "\n\n_(body truncated, see /doctor or logs)_"
+}
+
+// renderToolInput renders a tool's input as a labeled markdown block keyed by
+// tool name. Returns "" when there is nothing useful to show. Covers the
+// tool names used by Devin (ACP) and Copilot/Codex (Bash-style) so both
+// providers get the same field-level display.
+func renderToolInput(name string, input json.RawMessage) string {
+	if len(input) == 0 || string(input) == "null" {
+		return ""
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(input, &rec); err != nil {
+		return ""
+	}
+	str := func(k string) string {
+		if v, ok := rec[k].(string); ok {
+			return v
+		}
+		return ""
+	}
+	switch name {
+	case "command_execution", "Bash", "shell", "Ran command":
+		if cmd := str("command"); cmd != "" {
+			return fmt.Sprintf("**Command**\n```bash\n%s\n```", truncate(cmd, bodyFieldMax))
+		}
+	case "Read", "Edit", "Write", "NotebookEdit", "Read file":
+		if fp := str("file_path"); fp != "" {
+			return fmt.Sprintf("**File** `%s`", fp)
+		}
+	case "Grep", "Search for":
+		var lines []string
+		if pat := str("pattern"); pat != "" {
+			lines = append(lines, fmt.Sprintf("**Pattern** `%s`", pat))
+		}
+		if path := str("path"); path != "" {
+			lines = append(lines, fmt.Sprintf("**Path** `%s`", path))
+		}
+		if len(lines) > 0 {
+			return strings.Join(lines, "\n")
+		}
+	case "Glob", "Find files matching":
+		if pat := str("pattern"); pat != "" {
+			return fmt.Sprintf("**Pattern** `%s`", pat)
+		}
+	case "WebFetch":
+		if u := str("url"); u != "" {
+			return fmt.Sprintf("**URL** %s", u)
+		}
+	case "WebSearch":
+		if q := str("query"); q != "" {
+			return fmt.Sprintf("**Query** `%s`", truncate(q, bodyFieldMax))
+		}
+	}
+	return ""
+}
+
 // summarizeToolInput extracts a one-line, human-readable summary of a tool's
 // input so the user can see what the tool is operating on (which command is
 // being run, which file is being edited, etc.) without expanding the full
@@ -907,6 +1015,18 @@ func trimTail(b *strings.Builder, maxRunes int) {
 	b.Reset()
 	b.WriteString("_(... earlier content omitted)_\n\n")
 	b.WriteString(tail)
+}
+
+// trimTailString is the string-returning form of trimTail, used for the
+// reasoning-delta accumulation path (which keeps planText as a plain string,
+// not a Builder). Sets *dropped = true when content was truncated.
+func trimTailString(s string, maxRunes int, dropped *bool) string {
+	if len([]rune(s)) <= maxRunes {
+		return s
+	}
+	*dropped = true
+	tail := string([]rune(s)[len([]rune(s))-maxRunes:])
+	return "_(... earlier content omitted)_\n\n" + tail
 }
 
 func boolStr(b bool, yes, no string) string {
