@@ -1,5 +1,7 @@
 # lark-acp-bridge
 
+English | [简体中文](./README.zh.md)
+
 A Go bridge that connects Feishu / Lark messenger with local CLI coding
 agents. v1 ships **Devin** (driven through the Agent Client Protocol); v1.1
 adds **Codex** and a `/provider` switch command; v1.3 adds **GitHub Copilot**.
