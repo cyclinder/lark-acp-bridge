@@ -366,3 +366,105 @@ func TestSessionCancel(t *testing.T) {
 		t.Fatalf("SessionCancel: %v", err)
 	}
 }
+func TestSessionList(t *testing.T) {
+	srv, cli := newFakeServer(t)
+	defer srv.close()
+	defer cli.Close()
+
+	srv.mu.Lock()
+	srv.handlers["session/list"] = func(id *int64, _ json.RawMessage) {
+		srv.respond(id, SessionListResult{Sessions: []ListedSession{
+			{SessionID: "s1", Cwd: "/a", Title: "First", UpdatedAt: "2026-08-01T00:00:00Z"},
+			{SessionID: "s2", Cwd: "/b", Meta: &struct {
+				Locked bool `json:"cognition.ai/isLocked,omitempty"`
+			}{Locked: true}},
+		}})
+	}
+	srv.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, _ = cli.Initialize(ctx, InitializeParams{ProtocolVersion: ProtocolVersion})
+	res, err := cli.SessionList(ctx)
+	if err != nil {
+		t.Fatalf("SessionList: %v", err)
+	}
+	if len(res.Sessions) != 2 {
+		t.Fatalf("len(sessions) = %d, want 2", len(res.Sessions))
+	}
+	if res.Sessions[0].SessionID != "s1" || res.Sessions[0].Title != "First" {
+		t.Errorf("sessions[0] = %+v", res.Sessions[0])
+	}
+	if res.Sessions[0].IsLocked() {
+		t.Error("sessions[0] should not be locked")
+	}
+	if !res.Sessions[1].IsLocked() {
+		t.Error("sessions[1] should be locked")
+	}
+}
+
+// TestSessionLoadDrainsHistoryReplay verifies the client survives a
+// session/load whose history replay exceeds the notification buffer,
+// provided the caller drains Updates concurrently (as the adapter does).
+func TestSessionLoadDrainsHistoryReplay(t *testing.T) {
+	srv, cli := newFakeServer(t)
+	defer srv.close()
+	defer cli.Close()
+
+	const flood = 100 // more than the 64-entry Updates buffer
+	srv.mu.Lock()
+	srv.handlers["session/load"] = func(id *int64, _ json.RawMessage) {
+		for i := 0; i < flood; i++ {
+			srv.notify("session/update", SessionUpdateParams{
+				SessionID: "sess_loaded",
+				Update: Update{
+					SessionUpdate: UpdateAgentMessageChunk,
+					MessageID:     "m1",
+					Content:       mustJSON(Content{Type: "text", Text: "x"}),
+				},
+			})
+		}
+		srv.respond(id, SessionLoadResult{ConfigOptions: []ConfigOption{{ID: "model"}}})
+	}
+	srv.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, _ = cli.Initialize(ctx, InitializeParams{ProtocolVersion: ProtocolVersion})
+
+	// Drain concurrently, mirroring the adapter's spawn-time drainer.
+	stop := make(chan struct{})
+	drained := make(chan int, 1)
+	go func() {
+		n := 0
+		for {
+			select {
+			case _, ok := <-cli.Updates:
+				if !ok {
+					drained <- n
+					return
+				}
+				n++
+			case <-stop:
+				drained <- n
+				return
+			}
+		}
+	}()
+
+	res, err := cli.SessionLoad(ctx, SessionLoadParams{
+		SessionID: "sess_loaded", Cwd: "/a", McpServers: []MCPServer{},
+	})
+	if err != nil {
+		t.Fatalf("SessionLoad: %v", err)
+	}
+	close(stop)
+	if n := <-drained; n != flood {
+		t.Errorf("drained %d notifications, want %d", n, flood)
+	}
+	if len(res.ConfigOptions) != 1 || res.ConfigOptions[0].ID != "model" {
+		t.Fatalf("config options = %+v", res.ConfigOptions)
+	}
+}

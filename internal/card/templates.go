@@ -390,6 +390,68 @@ func ResumeCard(rows []ResumeRow, currentScope string) Card {
 	return shell("Resume", []Element{markdown(b.String())})
 }
 
+// --- provider sessions card ------------------------------------------------
+
+// SessionRow is one entry in the /sessions list (a provider-side session).
+type SessionRow struct {
+	Index     int
+	SessionID string
+	Title     string
+	Cwd       string
+	UpdatedAt time.Time
+	Locked    bool
+	Current   bool
+}
+
+// MaxSessionRows caps how many sessions the /sessions card renders. Feishu
+// cards have a per-element size limit (~30KB); a large provider session
+// store (hundreds of entries, ~50KB rendered) would make the card
+// unsendable. The list is sorted most-recently-updated first, so the cap
+// keeps the sessions a user is most likely to pick.
+const MaxSessionRows = 20
+
+// SessionsCard lists the provider's sessions with sequence numbers. The
+// session currently bound to this scope is marked so the user knows which
+// one future messages continue. Locked sessions are open in another client
+// and cannot be selected. total is the provider's full session count; when
+// it exceeds len(rows) a footer notes the truncation.
+func SessionsCard(rows []SessionRow, total int) Card {
+	var b strings.Builder
+	if len(rows) == 0 {
+		b.WriteString("The provider reported no sessions.")
+	} else {
+		b.WriteString("**Provider sessions** (use `/sessions <N>` to continue one):\n\n")
+		for _, r := range rows {
+			marker := ""
+			if r.Current {
+				marker = "  <- current chat"
+			}
+			state := ""
+			if r.Locked {
+				state = " (in use elsewhere)"
+			}
+			title := r.Title
+			if title == "" {
+				title = "(untitled)"
+			}
+			updated := "unknown time"
+			if !r.UpdatedAt.IsZero() {
+				updated = r.UpdatedAt.Local().Format("2006-01-02 15:04")
+			}
+			cwd := r.Cwd
+			if cwd == "" {
+				cwd = "(unset)"
+			}
+			b.WriteString(fmt.Sprintf("%d. **%s** | `%s` | cwd `%s` | %s%s%s\n",
+				r.Index, title, r.SessionID, cwd, updated, state, marker))
+		}
+		if total > len(rows) {
+			b.WriteString(fmt.Sprintf("\n_Showing the %d most recent of %d sessions._\n", len(rows), total))
+		}
+	}
+	return shell("Sessions", []Element{markdown(b.String())})
+}
+
 // --- run card (streaming) ------------------------------------------------
 
 // Caps that keep the streaming card bounded. Feishu cards have a per-element

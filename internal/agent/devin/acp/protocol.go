@@ -128,6 +128,42 @@ type SessionResumeParams struct {
 	McpServers []MCPServer `json:"mcpServers"`
 }
 
+// SessionLoadParams reconnects to an existing session, replaying its
+// history as session/update notifications before the response arrives.
+type SessionLoadParams struct {
+	SessionID  string      `json:"sessionId"`
+	Cwd        string      `json:"cwd"`
+	McpServers []MCPServer `json:"mcpServers"`
+}
+
+// SessionLoadResult is returned by session/load. Unlike session/new it
+// carries no sessionId (the caller already knows it); only the session's
+// config options and modes are reported.
+type SessionLoadResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+}
+
+// SessionListResult is returned by session/list.
+type SessionListResult struct {
+	Sessions []ListedSession `json:"sessions"`
+}
+
+// ListedSession is one entry in the agent's session list. Locked mirrors
+// the vendor _meta cognition.ai/isLocked flag: a locked session is open
+// in another client and cannot be loaded.
+type ListedSession struct {
+	SessionID string `json:"sessionId"`
+	Cwd       string `json:"cwd"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+	Meta      *struct {
+		Locked bool `json:"cognition.ai/isLocked,omitempty"`
+	} `json:"_meta,omitempty"`
+}
+
+// IsLocked reports whether the session is open in another client.
+func (s ListedSession) IsLocked() bool { return s.Meta != nil && s.Meta.Locked }
+
 type SessionCloseParams struct {
 	SessionID string `json:"sessionId"`
 }

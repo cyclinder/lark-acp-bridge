@@ -57,6 +57,13 @@ type ModelLister interface {
 	ListModels(ctx context.Context) ([]agent.ModelInfo, string, error)
 }
 
+// ProviderSessionLister enumerates the provider's own session list on
+// demand (e.g. Devin via `devin acp` session/list). Sessions are ordered
+// most-recently-updated first, matching the provider's own ordering.
+type ProviderSessionLister interface {
+	ListSessions(ctx context.Context) ([]agent.SessionInfo, error)
+}
+
 // ChatAdmin performs the Feishu group operations that /open needs. It is a
 // seam so the commands package stays testable without a live Lark client;
 // *lark.Channel implements it.
@@ -152,6 +159,7 @@ var handlers = map[string]Handler{
 	"/help":     handleHelp,
 	"/model":    handleModel,
 	"/resume":   handleResume,
+	"/sessions": handleSessions,
 	"/provider": handleProvider,
 }
 
@@ -244,6 +252,7 @@ func handleHelp(_ string, ctx *Context) error {
 	agentCommands := []string{
 		"`/model` — list available models (current marked); `/model <N|name>` switches",
 		"`/resume` — list saved sessions; `/resume <N>` to reconnect one",
+		"`/sessions` — list provider sessions; `/sessions <N>` to continue one",
 	}
 	c := card.HelpCard(ctx.Adapter.DisplayName(), agentCommands)
 	return sendCard(ctx, c)
@@ -404,6 +413,107 @@ func resumeByIndex(ctx *Context, input string) error {
 	}
 	return ctx.Sender.SendMarkdown(ctx.ChatID,
 		fmt.Sprintf("Resumed session `%s` (from scope `%s`). Next message will continue that context.", sid, picked.Scope),
+		ctx.MessageID)
+}
+
+// handleSessions implements /sessions. With no args it lists the current
+// provider's own sessions (most recently updated first). With a numeric
+// arg it binds the scope to the selected session: the next message loads
+// that session and continues its context.
+func handleSessions(args string, ctx *Context) error {
+	input := strings.TrimSpace(args)
+	if input == "" {
+		return listProviderSessions(ctx)
+	}
+	return selectProviderSession(ctx, input)
+}
+
+// providerSessionList fetches the provider's session list through the
+// ProviderSessionLister seam, or reports that the provider cannot list.
+func providerSessionList(ctx *Context) ([]agent.SessionInfo, error) {
+	sl, ok := ctx.Adapter.(ProviderSessionLister)
+	if !ok {
+		return nil, fmt.Errorf("provider `%s` does not support listing sessions", providerID(ctx))
+	}
+	return sl.ListSessions(context.Background())
+}
+
+func listProviderSessions(ctx *Context) error {
+	sessions, err := providerSessionList(ctx)
+	if err != nil {
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Cannot list sessions: %s", err), ctx.MessageID)
+	}
+	currentID := ""
+	if entry, ok := ctx.Sessions.Get(ctx.Scope); ok {
+		currentID = entry.SessionID
+	}
+	// Cap the rendered rows; the card notes the truncation when the
+	// provider has more sessions than fit. Selection still resolves
+	// against the full list, so visible numbering stays consistent.
+	shown := sessions
+	if len(shown) > card.MaxSessionRows {
+		shown = shown[:card.MaxSessionRows]
+	}
+	rows := make([]card.SessionRow, 0, len(shown))
+	for i, s := range shown {
+		rows = append(rows, card.SessionRow{
+			Index:     i + 1,
+			SessionID: s.ID,
+			Title:     s.Title,
+			Cwd:       s.Cwd,
+			UpdatedAt: s.UpdatedAt,
+			Locked:    s.Locked,
+			Current:   s.ID == currentID,
+		})
+	}
+	return sendCard(ctx, card.SessionsCard(rows, len(sessions)))
+}
+
+func selectProviderSession(ctx *Context, input string) error {
+	n, err := strconv.Atoi(input)
+	if err != nil {
+		return ctx.Sender.SendMarkdown(ctx.ChatID, "Usage: `/sessions` to list, or `/sessions <N>` to pick a session.", ctx.MessageID)
+	}
+	sessions, err := providerSessionList(ctx)
+	if err != nil {
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Cannot list sessions: %s", err), ctx.MessageID)
+	}
+	if n < 1 || n > len(sessions) {
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Invalid session number %d. Use `/sessions` to list (1-%d).", n, len(sessions)), ctx.MessageID)
+	}
+	picked := sessions[n-1]
+	if picked.Locked {
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Session `%s` is open in another client and cannot be continued here.", picked.ID), ctx.MessageID)
+	}
+	// Stop any active run and kill the pooled session process so the next
+	// message spawns fresh and loads the picked session.
+	ctx.Active.Interrupt(ctx.Scope)
+	if c, ok := ctx.Adapter.(SessionCloser); ok {
+		c.Close(ctx.Scope)
+	}
+	// Preserve the scope's model preference; the session id and cwd come
+	// from the picked session.
+	cur, _ := ctx.Sessions.Get(ctx.Scope)
+	if err := ctx.Sessions.Set(ctx.Scope, session.Entry{
+		SessionID: picked.ID,
+		Cwd:       picked.Cwd,
+		Model:     cur.Model,
+	}); err != nil {
+		return err
+	}
+	// Point the scope's working directory at the session's original cwd;
+	// session/load requires the cwd the session was created with.
+	if picked.Cwd != "" {
+		if err := ctx.Workspaces.SetCwd(ctx.Scope, picked.Cwd); err != nil {
+			return err
+		}
+	}
+	title := picked.Title
+	if title == "" {
+		title = "(untitled)"
+	}
+	return ctx.Sender.SendMarkdown(ctx.ChatID,
+		fmt.Sprintf("Switched to session `%s` (%s). Subsequent messages continue that session; cwd is now `%s`.", picked.ID, title, picked.Cwd),
 		ctx.MessageID)
 }
 

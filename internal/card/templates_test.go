@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cognition/lark-acp-bridge/internal/agent"
 )
@@ -434,4 +435,47 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+func TestSessionsCard(t *testing.T) {
+	ts := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	c := SessionsCard([]SessionRow{
+		{Index: 1, SessionID: "s1", Title: "First", Cwd: "/a", UpdatedAt: ts, Current: true},
+		{Index: 2, SessionID: "s2", Cwd: "", Locked: true},
+	}, 2)
+	content := c.Elements[0].Content
+	for _, want := range []string{
+		"1. **First**", "`s1`", "cwd `/a`", "<- current chat",
+		"2. **(untitled)**", "cwd `(unset)`", "in use elsewhere", "unknown time",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("SessionsCard content missing %q:\n%s", want, content)
+		}
+	}
+	// "unknown time" applies to row 2 (zero UpdatedAt); row 1 must render
+	// a formatted timestamp instead.
+	if !strings.Contains(content, ts.Local().Format("2006-01-02 15:04")) {
+		t.Errorf("SessionsCard missing formatted timestamp:\n%s", content)
+	}
+	// total == len(rows): no truncation footer.
+	if strings.Contains(content, "most recent of") {
+		t.Errorf("unexpected truncation footer:\n%s", content)
+	}
+
+	empty := SessionsCard(nil, 0)
+	if !strings.Contains(empty.Elements[0].Content, "no sessions") {
+		t.Errorf("empty SessionsCard = %q", empty.Elements[0].Content)
+	}
+}
+
+func TestSessionsCardTruncationFooter(t *testing.T) {
+	rows := make([]SessionRow, MaxSessionRows)
+	for i := range rows {
+		rows[i] = SessionRow{Index: i + 1, SessionID: "s", Cwd: "/a"}
+	}
+	c := SessionsCard(rows, 299)
+	content := c.Elements[0].Content
+	if !strings.Contains(content, "Showing the 20 most recent of 299 sessions.") {
+		t.Errorf("missing truncation footer:\n%s", content)
+	}
 }

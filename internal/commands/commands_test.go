@@ -379,3 +379,155 @@ func TestProviderNotConfigured(t *testing.T) {
 		t.Fatalf("expected not-configured reply, got %q", fs.markdowns[0].markdown)
 	}
 }
+
+// fakeSessionListAdapter also implements ProviderSessionLister and
+// SessionCloser for /sessions tests.
+type fakeSessionListAdapter struct {
+	fakeAdapter
+	sessions []agent.SessionInfo
+	err      error
+	closed   []string
+}
+
+func (a *fakeSessionListAdapter) ListSessions(context.Context) ([]agent.SessionInfo, error) {
+	return a.sessions, a.err
+}
+
+func (a *fakeSessionListAdapter) Close(scope string) { a.closed = append(a.closed, scope) }
+
+func TestHandleSessionsUnsupported(t *testing.T) {
+	ctx := newTestContext(t)
+	handled, err := TryDispatch("/sessions", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /sessions = (%v, %v), want (true, nil)", handled, err)
+	}
+	fs := ctx.Sender.(*fakeSender)
+	if len(fs.markdowns) != 1 || !strings.Contains(fs.markdowns[0].markdown, "does not support") {
+		t.Fatalf("expected unsupported-provider reply, got %+v", fs.markdowns)
+	}
+}
+
+func TestHandleSessionsList(t *testing.T) {
+	ctx := newTestContext(t)
+	ctx.Adapter = &fakeSessionListAdapter{
+		fakeAdapter: fakeAdapter{name: "Devin"},
+		sessions: []agent.SessionInfo{
+			{ID: "s1", Title: "First", Cwd: "/a"},
+			{ID: "s2", Title: "Second", Cwd: "/b", Locked: true},
+		},
+	}
+	// Bind s1 to the scope so the card marks it as current.
+	if err := ctx.Sessions.Set(ctx.Scope, session.Entry{SessionID: "s1", Model: "opus"}); err != nil {
+		t.Fatal(err)
+	}
+	handled, err := TryDispatch("/sessions", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /sessions = (%v, %v), want (true, nil)", handled, err)
+	}
+	fs := ctx.Sender.(*fakeSender)
+	if len(fs.cards) != 1 {
+		t.Fatalf("expected 1 sessions card, got %d", len(fs.cards))
+	}
+	content := fs.cards[0].card.Elements[0].Content
+	for _, want := range []string{"First", "Second", "<- current chat", "in use elsewhere"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("sessions card missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestHandleSessionsSelect(t *testing.T) {
+	ctx := newTestContext(t)
+	ad := &fakeSessionListAdapter{
+		fakeAdapter: fakeAdapter{name: "Devin"},
+		sessions: []agent.SessionInfo{
+			{ID: "s1", Title: "First", Cwd: "/a"},
+			{ID: "s2", Title: "Second", Cwd: "/b"},
+		},
+	}
+	ctx.Adapter = ad
+	// Pre-existing model preference must survive the switch.
+	if err := ctx.Sessions.Set(ctx.Scope, session.Entry{Model: "opus"}); err != nil {
+		t.Fatal(err)
+	}
+	handled, err := TryDispatch("/sessions 2", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /sessions 2 = (%v, %v), want (true, nil)", handled, err)
+	}
+	entry, ok := ctx.Sessions.Get(ctx.Scope)
+	if !ok || entry.SessionID != "s2" || entry.Cwd != "/b" || entry.Model != "opus" {
+		t.Errorf("session entry after select = %+v ok=%v, want s2//b/opus", entry, ok)
+	}
+	if cwd := ctx.Workspaces.CwdFor(ctx.Scope, ""); cwd != "/b" {
+		t.Errorf("workspace cwd = %q, want /b", cwd)
+	}
+	if len(ad.closed) != 1 || ad.closed[0] != ctx.Scope {
+		t.Errorf("closed scopes = %v, want [%s]", ad.closed, ctx.Scope)
+	}
+	fs := ctx.Sender.(*fakeSender)
+	if len(fs.markdowns) != 1 || !strings.Contains(fs.markdowns[0].markdown, "Switched to session `s2`") {
+		t.Fatalf("unexpected reply: %+v", fs.markdowns)
+	}
+}
+
+func TestHandleSessionsSelectLocked(t *testing.T) {
+	ctx := newTestContext(t)
+	ctx.Adapter = &fakeSessionListAdapter{
+		fakeAdapter: fakeAdapter{name: "Devin"},
+		sessions:    []agent.SessionInfo{{ID: "s1", Cwd: "/a", Locked: true}},
+	}
+	handled, err := TryDispatch("/sessions 1", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /sessions 1 = (%v, %v), want (true, nil)", handled, err)
+	}
+	fs := ctx.Sender.(*fakeSender)
+	if len(fs.markdowns) != 1 || !strings.Contains(fs.markdowns[0].markdown, "open in another client") {
+		t.Fatalf("expected locked refusal, got %+v", fs.markdowns)
+	}
+	if _, ok := ctx.Sessions.Get(ctx.Scope); ok {
+		t.Error("session store must not change when the pick is refused")
+	}
+}
+
+func TestHandleSessionsInvalidIndex(t *testing.T) {
+	ctx := newTestContext(t)
+	ctx.Adapter = &fakeSessionListAdapter{
+		fakeAdapter: fakeAdapter{name: "Devin"},
+		sessions:    []agent.SessionInfo{{ID: "s1", Cwd: "/a"}},
+	}
+	handled, err := TryDispatch("/sessions 9", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /sessions 9 = (%v, %v), want (true, nil)", handled, err)
+	}
+	fs := ctx.Sender.(*fakeSender)
+	if len(fs.markdowns) != 1 || !strings.Contains(fs.markdowns[0].markdown, "Invalid session number") {
+		t.Fatalf("expected invalid-number reply, got %+v", fs.markdowns)
+	}
+}
+
+// TestHandleSessionsListCapped verifies the card renders at most
+// card.MaxSessionRows rows even when the provider reports many sessions,
+// and notes the truncation.
+func TestHandleSessionsListCapped(t *testing.T) {
+	ctx := newTestContext(t)
+	sessions := make([]agent.SessionInfo, 50)
+	for i := range sessions {
+		sessions[i] = agent.SessionInfo{ID: "s", Cwd: "/a"}
+	}
+	ctx.Adapter = &fakeSessionListAdapter{fakeAdapter: fakeAdapter{name: "Codex"}, sessions: sessions}
+	handled, err := TryDispatch("/sessions", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch /sessions = (%v, %v), want (true, nil)", handled, err)
+	}
+	fs := ctx.Sender.(*fakeSender)
+	if len(fs.cards) != 1 {
+		t.Fatalf("expected 1 card, got %d", len(fs.cards))
+	}
+	content := fs.cards[0].card.Elements[0].Content
+	if !strings.Contains(content, "Showing the 20 most recent of 50 sessions.") {
+		t.Errorf("missing truncation footer:\n%s", content)
+	}
+	if strings.Contains(content, "21. ") {
+		t.Errorf("card renders more than %d rows", card.MaxSessionRows)
+	}
+}

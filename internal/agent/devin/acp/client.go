@@ -88,6 +88,28 @@ func (c *Client) SessionResume(ctx context.Context, params SessionResumeParams) 
 	return c.call(ctx, "session/resume", params, &res)
 }
 
+// SessionLoad reconnects to an existing session. The agent replays the
+// session's history as session/update notifications (delivered on Updates)
+// before the response arrives; the caller MUST drain Updates concurrently
+// or the read loop will block once the notification buffer fills.
+func (c *Client) SessionLoad(ctx context.Context, params SessionLoadParams) (*SessionLoadResult, error) {
+	var res SessionLoadResult
+	if err := c.call(ctx, "session/load", params, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// SessionList enumerates the agent's known sessions (requires the "list"
+// session capability).
+func (c *Client) SessionList(ctx context.Context) (*SessionListResult, error) {
+	var res SessionListResult
+	if err := c.call(ctx, "session/list", struct{}{}, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 // SessionPrompt sends a prompt and blocks until the turn ends (stopReason
 // returned) or the context is cancelled. Notifications emitted during the
 // turn are delivered on Updates concurrently.

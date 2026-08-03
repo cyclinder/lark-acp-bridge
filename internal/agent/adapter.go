@@ -104,6 +104,18 @@ type ModelInfo struct {
 	Name  string
 }
 
+// SessionInfo is one provider-side session as reported by a provider that
+// can enumerate its session list (e.g. Devin via ACP session/list).
+type SessionInfo struct {
+	ID        string
+	Title     string
+	Cwd       string
+	UpdatedAt time.Time
+	// Locked means the session is open in another client and cannot be
+	// loaded right now.
+	Locked bool
+}
+
 // StopReason values mirrored from ACP for convenience.
 const (
 	StopEndTurn         = "end_turn"

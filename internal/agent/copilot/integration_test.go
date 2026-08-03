@@ -95,3 +95,29 @@ func TestSmokeRealCopilotTurn(t *testing.T) {
 	}
 	fmt.Printf("  codeword.txt=%q\n", string(content))
 }
+
+// TestSmokeListSessions scans the real ~/.copilot/session-state tree end to
+// end.
+func TestSmokeListSessions(t *testing.T) {
+	a := New()
+	sessions, err := a.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) == 0 {
+		t.Fatal("empty session list")
+	}
+	fmt.Printf("%d sessions\n", len(sessions))
+	for i, s := range sessions {
+		if i >= 10 {
+			fmt.Printf("    ...\n")
+			break
+		}
+		fmt.Printf("    %s | %s | %s | %s\n", s.ID, s.Title, s.Cwd, s.UpdatedAt.Format("2006-01-02 15:04"))
+	}
+	// Second call must be served from the cache.
+	sessions2, err := a.ListSessions(context.Background())
+	if err != nil || len(sessions2) != len(sessions) {
+		t.Fatalf("cached ListSessions: err=%v len=%d want %d", err, len(sessions2), len(sessions))
+	}
+}

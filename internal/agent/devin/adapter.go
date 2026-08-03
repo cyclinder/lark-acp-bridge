@@ -44,6 +44,11 @@ type Adapter struct {
 	modelsCache     []agent.ModelInfo
 	modelsCurrentID string
 	modelsFetchedAt time.Time
+
+	// sessionsMu guards the ListSessions cache.
+	sessionsMu        sync.Mutex
+	sessionsCache     []agent.SessionInfo
+	sessionsFetchedAt time.Time
 }
 
 // sessionClient wraps one long-lived devin acp process + ACP client for a
@@ -132,12 +137,15 @@ func (a *Adapter) Available(ctx context.Context) error {
 // must hold the returned client's runMu for the duration of the prompt turn.
 // If the pool is at capacity and this scope has no existing client, an error
 // is returned.
-func (a *Adapter) getOrCreate(ctx context.Context, scope, cwd, model string) (*sessionClient, error) {
+func (a *Adapter) getOrCreate(ctx context.Context, scope, cwd, model, sessionID string) (*sessionClient, error) {
 	a.mu.Lock()
 	sc, ok := a.pool[scope]
 	a.mu.Unlock()
 
-	if ok && sc.isAlive() {
+	// Reuse the pooled client only when it already hosts the requested
+	// session (or the caller has no preference). A mismatch means the
+	// scope switched sessions (e.g. via /sessions): rebuild below.
+	if ok && sc.isAlive() && (sessionID == "" || sc.sessionID == sessionID) {
 		return sc, nil
 	}
 	if ok {
@@ -161,12 +169,13 @@ func (a *Adapter) getOrCreate(ctx context.Context, scope, cwd, model string) (*s
 		}
 	}
 
-	return a.spawn(ctx, scope, cwd, model)
+	return a.spawn(ctx, scope, cwd, model, sessionID)
 }
 
-// spawn starts a new devin acp process, performs the ACP handshake, creates
-// a session, and caches the client in the pool.
-func (a *Adapter) spawn(ctx context.Context, scope, cwd, model string) (*sessionClient, error) {
+// spawn starts a new devin acp process, performs the ACP handshake, opens
+// a session (loading an existing one when sessionID is set, creating a new
+// one otherwise), and caches the client in the pool.
+func (a *Adapter) spawn(ctx context.Context, scope, cwd, model, sessionID string) (*sessionClient, error) {
 	// Build the devin acp command line. Global flags (--permission-mode,
 	// --model) must come BEFORE the "acp" subcommand, not after it.
 	args := []string{}
@@ -211,14 +220,49 @@ func (a *Adapter) spawn(ctx context.Context, scope, cwd, model string) (*session
 		return nil, fmt.Errorf("acp initialize: %w", err)
 	}
 
-	// Create a new session. (devin 2026.8.18 does not support resume.)
-	sn, err := client.SessionNew(ctx, acp.SessionNewParams{
-		Cwd:        cwd,
-		McpServers: []acp.MCPServer{}, // required field, must not be nil
-	})
-	if err != nil {
-		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("acp session/new: %w", err)
+	// Open the session: load an existing one when the caller stashed a
+	// provider session id (via /sessions), create a fresh one otherwise.
+	var configOpts []acp.ConfigOption
+	if sessionID != "" {
+		// session/load replays the full history as notifications before
+		// its response arrives — far more than the client's notification
+		// buffer holds. Drain and discard them concurrently so the read
+		// loop never blocks.
+		stopDrain := make(chan struct{})
+		defer close(stopDrain)
+		go func() {
+			for {
+				select {
+				case _, ok := <-client.Updates:
+					if !ok {
+						return
+					}
+				case <-stopDrain:
+					return
+				}
+			}
+		}()
+		lr, err := client.SessionLoad(ctx, acp.SessionLoadParams{
+			SessionID:  sessionID,
+			Cwd:        cwd,
+			McpServers: []acp.MCPServer{}, // required field, must not be nil
+		})
+		if err != nil {
+			_ = cmd.Process.Kill()
+			return nil, fmt.Errorf("acp session/load %s: %w", sessionID, err)
+		}
+		configOpts = lr.ConfigOptions
+	} else {
+		sn, err := client.SessionNew(ctx, acp.SessionNewParams{
+			Cwd:        cwd,
+			McpServers: []acp.MCPServer{}, // required field, must not be nil
+		})
+		if err != nil {
+			_ = cmd.Process.Kill()
+			return nil, fmt.Errorf("acp session/new: %w", err)
+		}
+		sessionID = sn.SessionID
+		configOpts = sn.ConfigOptions
 	}
 
 	// Force the session into "bypass" mode (auto-approve all tool calls).
@@ -227,13 +271,12 @@ func (a *Adapter) spawn(ctx context.Context, scope, cwd, model string) (*session
 	// behind an interactive approval prompt that nobody can answer in stdio
 	// mode, hanging the run forever. Setting config option "mode"="bypass"
 	// via session/set_config_option is the supported way to disable prompts.
-	configOpts := sn.ConfigOptions
 	if res, err := client.SetConfigOption(ctx, acp.SetConfigOptionParams{
-		SessionID: sn.SessionID,
+		SessionID: sessionID,
 		ConfigID:  "mode",
 		Value:     "bypass",
 	}); err != nil {
-		bridgetlog.Info("devin", "bypass-mode", fmt.Sprintf("scope=%s session=%s set failed: %v", scope, sn.SessionID, err))
+		bridgetlog.Info("devin", "bypass-mode", fmt.Sprintf("scope=%s session=%s set failed: %v", scope, sessionID, err))
 	} else if res != nil {
 		configOpts = res.ConfigOptions
 	}
@@ -242,7 +285,7 @@ func (a *Adapter) spawn(ctx context.Context, scope, cwd, model string) (*session
 		scope:       scope,
 		cmd:         cmd,
 		client:      client,
-		sessionID:   sn.SessionID,
+		sessionID:   sessionID,
 		configOpts:  configOpts,
 		cwd:         cwd,
 		idleTimeout: a.idleTimeout,
@@ -253,7 +296,7 @@ func (a *Adapter) spawn(ctx context.Context, scope, cwd, model string) (*session
 	a.pool[scope] = sc
 	a.mu.Unlock()
 
-	bridgetlog.Info("devin", "spawn", fmt.Sprintf("scope=%s session=%s mode=bypass", scope, sn.SessionID))
+	bridgetlog.Info("devin", "spawn", fmt.Sprintf("scope=%s session=%s mode=bypass", scope, sessionID))
 	return sc, nil
 }
 
@@ -269,7 +312,7 @@ func (a *Adapter) Run(ctx context.Context, opts agent.RunOptions) (agent.Run, er
 		stopGrace = 5 * time.Second
 	}
 
-	sc, err := a.getOrCreate(ctx, opts.Scope, opts.Cwd, opts.Model)
+	sc, err := a.getOrCreate(ctx, opts.Scope, opts.Cwd, opts.Model, opts.SessionID)
 	if err != nil {
 		return nil, err
 	}

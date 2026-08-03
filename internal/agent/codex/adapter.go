@@ -30,6 +30,11 @@ type Adapter struct {
 	binary       string
 	sandbox      string
 	defaultModel string
+
+	// Session-list scan cache (see sessions.go).
+	sessionsMu        sync.Mutex
+	sessionsCache     []agent.SessionInfo
+	sessionsFetchedAt time.Time
 }
 
 // Option configures an Adapter.

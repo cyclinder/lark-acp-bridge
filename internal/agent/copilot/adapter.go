@@ -36,6 +36,11 @@ type Adapter struct {
 	modelsCache     []agent.ModelInfo
 	acpCurrentID    string
 	modelsFetchedAt time.Time
+
+	// Session-list scan cache (see sessions.go).
+	sessionsMu        sync.Mutex
+	sessionsCache     []agent.SessionInfo
+	sessionsFetchedAt time.Time
 }
 
 // Option configures an Adapter.

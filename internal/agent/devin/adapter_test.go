@@ -136,7 +136,7 @@ func TestMaxConcurrentReject(t *testing.T) {
 	a.mu.Unlock()
 
 	// chat_3 should be rejected.
-	_, err := a.getOrCreate(context.Background(), "chat_3", "/tmp", "")
+	_, err := a.getOrCreate(context.Background(), "chat_3", "/tmp", "", "")
 	if err == nil {
 		t.Fatal("expected error when pool is at capacity")
 	}
