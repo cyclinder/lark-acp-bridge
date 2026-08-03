@@ -37,6 +37,13 @@ type Adapter struct {
 
 	mu   sync.Mutex
 	pool map[string]*sessionClient
+
+	// modelsMu guards the ListModels cache. Lock ordering: modelsMu
+	// before mu (never the reverse).
+	modelsMu        sync.Mutex
+	modelsCache     []agent.ModelInfo
+	modelsCurrentID string
+	modelsFetchedAt time.Time
 }
 
 // sessionClient wraps one long-lived devin acp process + ACP client for a
