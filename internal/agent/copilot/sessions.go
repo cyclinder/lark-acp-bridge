@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -49,7 +50,11 @@ func copilotHome() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		current, currentErr := user.Current()
+		if currentErr != nil {
+			return ""
+		}
+		home = current.HomeDir
 	}
 	return filepath.Join(home, ".copilot")
 }

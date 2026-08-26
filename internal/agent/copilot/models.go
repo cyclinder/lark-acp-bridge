@@ -58,15 +58,7 @@ func (a *Adapter) currentModel() string {
 // readSettingsModel reads the persisted default model from the Copilot CLI's
 // own settings file. Best-effort: any error yields "".
 func readSettingsModel() string {
-	dir := os.Getenv("COPILOT_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(home, ".copilot")
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	data, err := os.ReadFile(filepath.Join(copilotHome(), "settings.json"))
 	if err != nil {
 		return ""
 	}

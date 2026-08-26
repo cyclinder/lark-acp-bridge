@@ -6,6 +6,7 @@ package copilot
 import (
 	"context"
 	"os"
+	"os/user"
 	"path/filepath"
 	"testing"
 )
@@ -91,6 +92,18 @@ func TestScanSessionState(t *testing.T) {
 func TestScanSessionStateMissingRoot(t *testing.T) {
 	if _, err := scanSessionState(t.TempDir()); err == nil {
 		t.Fatal("expected error for missing session-state directory")
+	}
+}
+
+func TestCopilotHomeWithoutHomeEnvironment(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COPILOT_HOME", "")
+	t.Setenv("HOME", "")
+	if got, want := copilotHome(), filepath.Join(current.HomeDir, ".copilot"); got != want {
+		t.Fatalf("copilotHome() = %q, want %q", got, want)
 	}
 }
 
