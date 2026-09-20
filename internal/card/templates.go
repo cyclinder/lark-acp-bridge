@@ -215,13 +215,13 @@ func ModelsCard(models []ModelEntry, current string) Card {
 		} else {
 			b.WriteString("**Current model:** _none (provider default will apply)_\n\n")
 		}
-		b.WriteString("**Available models** (use `/model <N>` or `/model <name>` to switch):\n\n")
+		b.WriteString("**Available models** (use `/model N` or `/model name` to switch):\n\n")
 		for i, m := range models {
 			marker := ""
 			if m.Value == current {
 				marker = "  <- current"
 			}
-			b.WriteString(fmt.Sprintf("%d. `%s` — %s%s\n", i+1, m.Value, m.Name, marker))
+			b.WriteString(fmt.Sprintf("**%d.** `%s` — %s%s\n", i+1, m.Value, m.Name, marker))
 		}
 	}
 	return shell("Model", []Element{markdown(b.String())})
@@ -309,7 +309,7 @@ func WorkspacesCard(current string, entries []WorkspaceEntry) Card {
 			if e.Current {
 				marker = "  <- current"
 			}
-			b.WriteString(fmt.Sprintf("%d. **%s** -> `%s`%s\n", i+1, e.Name, e.Cwd, marker))
+			b.WriteString(fmt.Sprintf("**%d.** **%s** -> `%s`%s\n", i+1, e.Name, e.Cwd, marker))
 		}
 	}
 	return shell("Workspaces", []Element{markdown(b.String())})
@@ -360,13 +360,13 @@ type ResumeRow struct {
 }
 
 // ResumeCard lists past sessions with sequence numbers. The current scope
-// is marked so the user knows which one will be resumed by `/resume <N>`.
+// is marked so the user knows which one will be resumed by `/resume N`.
 func ResumeCard(rows []ResumeRow, currentScope string) Card {
 	var b strings.Builder
 	if len(rows) == 0 {
 		b.WriteString("No saved sessions. Start a run first, then use `/resume` to reconnect.")
 	} else {
-		b.WriteString("**Saved sessions** (use `/resume <N>` to reconnect):\n\n")
+		b.WriteString("**Saved sessions** (use `/resume N` to reconnect):\n\n")
 		for _, r := range rows {
 			marker := ""
 			if r.Scope == currentScope {
@@ -384,7 +384,7 @@ func ResumeCard(rows []ResumeRow, currentScope string) Card {
 			if model == "" {
 				model = "(default)"
 			}
-			b.WriteString(fmt.Sprintf("%d. `%s` | session `%s` | cwd `%s` | model %s%s\n",
+			b.WriteString(fmt.Sprintf("**%d.** `%s` | session `%s` | cwd `%s` | model %s%s\n",
 				r.Index, r.Scope, sid, cwd, model, marker))
 		}
 	}
@@ -421,7 +421,7 @@ func SessionsCard(rows []SessionRow, total int) Card {
 	if len(rows) == 0 {
 		b.WriteString("The provider reported no sessions.")
 	} else {
-		b.WriteString("**Provider sessions** (use `/sessions <N>` to continue one):\n\n")
+		b.WriteString("**Provider sessions** (use `/sessions N` to continue one):\n\n")
 		for _, r := range rows {
 			marker := ""
 			if r.Current {
@@ -443,7 +443,7 @@ func SessionsCard(rows []SessionRow, total int) Card {
 			if cwd == "" {
 				cwd = "(unset)"
 			}
-			b.WriteString(fmt.Sprintf("%d. **%s** | `%s` | cwd `%s` | %s%s%s\n",
+			b.WriteString(fmt.Sprintf("**%d.** **%s** | `%s` | cwd `%s` | %s%s%s\n",
 				r.Index, title, r.SessionID, cwd, updated, state, marker))
 		}
 		if total > len(rows) {

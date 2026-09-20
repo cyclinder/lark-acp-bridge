@@ -445,8 +445,8 @@ func TestSessionsCard(t *testing.T) {
 	}, 2)
 	content := c.Elements[0].Content
 	for _, want := range []string{
-		"1. **First**", "`s1`", "cwd `/a`", "<- current chat",
-		"2. **(untitled)**", "cwd `(unset)`", "in use elsewhere", "unknown time",
+		"**1.** **First**", "`s1`", "cwd `/a`", "<- current chat",
+		"**2.** **(untitled)**", "cwd `(unset)`", "in use elsewhere", "unknown time",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("SessionsCard content missing %q:\n%s", want, content)
