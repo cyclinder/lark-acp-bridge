@@ -13,7 +13,8 @@ adds **Codex** and a `/provider` switch command; v1.3 adds **GitHub Copilot**.
   `copilot -p --output-format json`).
 - Streams agent responses (text, tool calls, usage) onto one live Lark card.
 - Handles slash commands locally (zero token cost): `/help`, `/new`, `/cd`,
-  `/ws`, `/open`, `/status`, `/pwd`, `/stop`, `/model`, `/provider`, `/resume`.
+  `/ws`, `/open`, `/status`, `/pwd`, `/stop`, `/model`, `/provider`, `/resume`,
+  `/new-issue`.
 - `/open` creates (or reuses) a Feishu group bound to a working directory,
   so a project can have its own dedicated multi-user chat.
 - Per-chat session continuity.
@@ -61,7 +62,8 @@ it, the long connection has nothing to deliver.
 
 On **Permissions & Scopes** (权限管理) → **API Permissions**, add these
 scopes. The first four are required for the core bridge; the last two are
-only needed for `/open` (creating groups and adding members).
+only needed for `/open` (creating groups and adding members) and
+`/new-issue` (reading chat history and its images).
 
 | Scope | Why |
 |---|---|
@@ -71,6 +73,8 @@ only needed for `/open` (creating groups and adding members).
 | `im:message.reaction:write` | Add the "typing" reaction to acknowledge a user message |
 | `im:chat:create` | `/open`: create a group bound to a working directory |
 | `im:chat:members:write` | `/open`: add users to the created group |
+| `im:message.group_msg` | `/new-issue`: read the group's message history (sensitive scope; stricter admin review) |
+| `im:resource` | `/new-issue`: download images attached to history messages |
 
 After adding scopes, click **Publish version** (创建版本) and have your
 tenant admin **approve** it (or, for a personal test app, approve it
@@ -209,6 +213,23 @@ to `devin`; set it to `codex` or `copilot` to make one of them the default.
 The `codex` and `copilot` blocks are optional — omit them to disable those
 providers entirely.
 
+An optional `newIssue` block tunes the `/new-issue` command:
+
+```json
+  "newIssue": {
+    "maxMessages": 500,
+    "charBudget": 80000,
+    "maxImages": 10,
+    "promptTemplate": ""
+  }
+```
+
+`maxMessages` caps how many history messages are fetched, `charBudget` caps
+the transcript size (oldest messages dropped first), and `maxImages` caps
+how many images are downloaded (newest first). `promptTemplate` overrides
+the built-in prompt; it may use the `{{repo}}`, `{{count}}`, `{{extra}}`,
+and `{{history}}` placeholders.
+
 The `copilot.permissions` field maps onto Copilot CLI approval flags:
 `"allow-all"` (`--allow-all`: tools, paths, URLs — the default),
 `"allow-all-tools"` (`--allow-all-tools`: tools auto-approved, out-of-workspace
@@ -291,6 +312,11 @@ In a group, the bot only responds when @mentioned. In a DM, every plain
 message is a prompt. Slash commands are handled locally and never cost
 tokens; only plain messages reach the agent.
 
+**Owner gate**: only the bridge owner may run the agent or state-changing
+commands; everyone else is limited to `/help`, `/status`, and `/pwd`. The
+owner is the app's creator, resolved automatically from the app collaborator
+list; set the top-level `owner` config field (an open_id) to override it.
+
 ## Slash commands
 
 All commands are handled locally by the bridge — they never invoke the
@@ -310,6 +336,7 @@ agent subprocess and never consume tokens.
 | `/model <N\|name>` | Switch model (resets the session); `<N>` is the list index from `/model` |
 | `/provider` | List registered providers; `/provider <id>` overrides the default per chat, `/provider default` reverts (switching clears the session) |
 | `/resume` | List past sessions and resume one with `/resume <N>` |
+| `/new-issue <repo> [--last N] [--since today\|24h\|7d] [notes]` | Fetch the group's recent messages (senders anonymized, images downloaded) and have the agent create a GitHub issue from them, following the repo's issue template when one exists and writing the body in English first with a Chinese section after. `<repo>` is required: `owner/repo`, a GitHub URL, or a bare project name — for a bare name the agent locates the official upstream repo (never a fork) and, when ambiguous, replies with candidates instead of creating the issue |
 
 ## Architecture
 

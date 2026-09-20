@@ -27,6 +27,7 @@ import (
 	"os/signal"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -278,6 +279,13 @@ func runForeground(configPath string, managed bool) {
 	debounce := time.Duration(cfg.DebounceMs) * time.Millisecond
 	batcher := intake.New(debounce, app.startRun)
 
+	// Resolve the bridge owner up front so the gate is effective from the
+	// very first message and the owner is visible in the startup log. A
+	// failure here is not fatal: ownerOpenID retries on each message.
+	if owner := app.ownerOpenID(); owner == "" {
+		bridgetlog.Warn("main", "owner", "owner not resolved at startup; non-owner restrictions apply until lookup succeeds")
+	}
+
 	// Register message handler.
 	ch.OnMessage(func(ctx context.Context, msg *larktypes.NormalizedMessage) error {
 		return app.handleMessage(msg, batcher)
@@ -457,7 +465,36 @@ type appCtx struct {
 	ch         *lark.Channel
 	executor   *run.Executor
 	active     *run.ActiveRuns
+
+	ownerMu sync.Mutex
+	owner   string // cached bridge-owner open_id ("" = not yet resolved)
 }
+
+// ownerOpenID returns the bridge owner's open_id: the config override when
+// set, else the app's creator resolved once via the collaborators API.
+// Returns "" when the owner cannot be determined (lookup retried on the next
+// message).
+func (a *appCtx) ownerOpenID() string {
+	if a.cfg.Owner != "" {
+		return a.cfg.Owner
+	}
+	a.ownerMu.Lock()
+	defer a.ownerMu.Unlock()
+	if a.owner != "" {
+		return a.owner
+	}
+	owner, err := a.ch.AppOwner(a.cfg.App.ID)
+	if err != nil {
+		bridgetlog.Warn("main", "owner-lookup", err.Error())
+		return ""
+	}
+	bridgetlog.Info("main", "owner-resolved", owner)
+	a.owner = owner
+	return owner
+}
+
+// readOnlyCommands are the slash commands non-owner users may invoke.
+var readOnlyCommands = map[string]bool{"/help": true, "/status": true, "/pwd": true}
 
 func (a *appCtx) handleMessage(msg *larktypes.NormalizedMessage, batcher *intake.Batcher) error {
 	chatID := msg.ChatID
@@ -479,6 +516,23 @@ func (a *appCtx) handleMessage(msg *larktypes.NormalizedMessage, batcher *intake
 	}
 
 	content := stripMentions(msg.Content, msg.Mentions)
+
+	// Owner gate: only the bridge owner (the app creator, or config.owner
+	// when set) may run the agent or state-changing commands. Everyone else
+	// is limited to the read-only commands.
+	if owner := a.ownerOpenID(); msg.UserID != owner {
+		cmd := ""
+		if fields := strings.Fields(content); len(fields) > 0 {
+			cmd = fields[0]
+		}
+		if !readOnlyCommands[cmd] {
+			reply := "Only the bridge owner can use this. Available to you: `/help`, `/status`, `/pwd`."
+			if owner == "" {
+				reply = "Cannot verify the bridge owner right now; only `/help`, `/status`, `/pwd` are available."
+			}
+			return a.ch.SendMarkdown(chatID, reply, msg.MessageID)
+		}
+	}
 
 	// Resolve the effective adapter for this scope (per-chat /provider
 	// override, else the default). The same adapter is used for slash
@@ -503,6 +557,8 @@ func (a *appCtx) handleMessage(msg *larktypes.NormalizedMessage, batcher *intake
 		ChatAdmin:  a.ch,
 		ChatBinds:  a.chatBinds,
 		Executor:   a.executor,
+		History:    a.ch,
+		StartRun:   func(prompt, cwd string) { a.startRunIn(scope, prompt, cwd) },
 	}
 
 	// Try slash command dispatch first. Slash commands cancel any pending
@@ -541,12 +597,19 @@ func (a *appCtx) handleMessage(msg *larktypes.NormalizedMessage, batcher *intake
 // and the effective adapter, then launches one agent run with the
 // concatenated prompt.
 func (a *appCtx) startRun(scope, prompt string) {
-	chatID := scope // v1: scope == chatID
 	cwd := a.workspaces.CwdFor(scope, a.cfg.Workspace.Default)
 	if cwd == "" {
-		_ = a.ch.SendMarkdown(chatID, "No working directory set. Use `/cd <path>` first.", "")
+		_ = a.ch.SendMarkdown(scope, "No working directory set. Use `/cd <path>` first.", "")
 		return
 	}
+	a.startRunIn(scope, prompt, cwd)
+}
+
+// startRunIn launches one agent run with an explicit working directory. It
+// backs both plain-message runs (via startRun) and /new-issue, which supplies
+// its own cwd fallback.
+func (a *appCtx) startRunIn(scope, prompt, cwd string) {
+	chatID := scope // v1: scope == chatID
 	adapter := a.registry.Resolve(scope)
 	if adapter == nil {
 		_ = a.ch.SendMarkdown(chatID, "No provider available for this chat. Use `/provider` to pick one.", "")

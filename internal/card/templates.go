@@ -154,6 +154,7 @@ var bridgeHelpCommands = []string{
 	"`/pwd` — print the current working directory",
 	"`/stop` — stop the active run",
 	"`/resume` — list and resume past sessions",
+	"`/new-issue <repo> [--last N] [--since today|24h|7d]` — turn recent group messages into a GitHub issue in the given repo",
 	"`/provider` — list providers; `/provider <id>` to switch, `/provider default` to reset",
 	"`/help` — this help",
 }

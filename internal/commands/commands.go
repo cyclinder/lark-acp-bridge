@@ -140,6 +140,13 @@ type Context struct {
 	ChatAdmin  ChatAdmin
 	// ChatBinds is the persistent chatID -> bind store backing /open reuse.
 	ChatBinds  *chatbind.Store
+	// History, when set, enables the /new-issue command. Nil when the bridge
+	// runs without the chat-history read permission.
+	History    HistoryReader
+	// StartRun launches one agent run for this chat with the given prompt
+	// in the given working directory, bypassing the debounce batcher. Set
+	// by main; used by /new-issue.
+	StartRun func(prompt, cwd string)
 	// ModelList is the cached model options for the current scope, if any.
 	ModelList []card.ModelEntry
 }
@@ -161,6 +168,7 @@ var handlers = map[string]Handler{
 	"/resume":   handleResume,
 	"/sessions": handleSessions,
 	"/provider": handleProvider,
+	"/new-issue": handleNewIssue,
 }
 
 // TryDispatch checks if a message is a slash command and dispatches it.
@@ -250,9 +258,9 @@ func handleStop(_ string, ctx *Context) error {
 
 func handleHelp(_ string, ctx *Context) error {
 	agentCommands := []string{
-		"`/model` — list available models (current marked); `/model <N|name>` switches",
-		"`/resume` — list saved sessions; `/resume <N>` to reconnect one",
-		"`/sessions` — list provider sessions; `/sessions <N>` to continue one",
+		"`/model` — list available models (current marked); `/model N|name` switches",
+		"`/resume` — list saved sessions; `/resume N` to reconnect one",
+		"`/sessions` — list provider sessions; `/sessions N` to continue one",
 	}
 	c := card.HelpCard(ctx.Adapter.DisplayName(), agentCommands)
 	return sendCard(ctx, c)
@@ -380,7 +388,7 @@ func listSessions(ctx *Context) error {
 func resumeByIndex(ctx *Context, input string) error {
 	n, err := strconv.Atoi(input)
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "Usage: `/resume` to list, or `/resume <N>` to pick a session.", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, "Usage: `/resume` to list, or `/resume N` to pick a session.", ctx.MessageID)
 	}
 	items := ctx.Sessions.List()
 	if n < 1 || n > len(items) {
@@ -472,7 +480,7 @@ func listProviderSessions(ctx *Context) error {
 func selectProviderSession(ctx *Context, input string) error {
 	n, err := strconv.Atoi(input)
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "Usage: `/sessions` to list, or `/sessions <N>` to pick a session.", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, "Usage: `/sessions` to list, or `/sessions N` to pick a session.", ctx.MessageID)
 	}
 	sessions, err := providerSessionList(ctx)
 	if err != nil {

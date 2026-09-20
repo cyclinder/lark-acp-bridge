@@ -16,10 +16,14 @@ import (
 // profile; multi-profile is deferred to v2.
 type Config struct {
 	App                App       `json:"app"`
+	// Owner optionally pins the bridge owner's open_id. When empty, the
+	// owner is resolved from the app's collaborator list (the app creator).
+	Owner              string    `json:"owner,omitempty"`
 	Workspace          Workspace `json:"workspace"`
 	Agent              Agent     `json:"agent"`
 	Codex              *Codex    `json:"codex,omitempty"`
 	Copilot            *Copilot  `json:"copilot,omitempty"`
+	NewIssue           *NewIssue `json:"newIssue,omitempty"`
 	DefaultProvider    string    `json:"defaultProvider,omitempty"`
 	MaxConcurrentRuns  int       `json:"maxConcurrentRuns"`
 	DebounceMs         int       `json:"debounceMs"`
@@ -71,6 +75,55 @@ type Copilot struct {
 	Binary       string `json:"binary,omitempty"`
 	Permissions  string `json:"permissions,omitempty"`
 	DefaultModel string `json:"defaultModel,omitempty"`
+}
+
+// NewIssue tunes the /new-issue command. All fields are optional; zero
+// values fall back to the accessor defaults below.
+type NewIssue struct {
+	// MaxMessages caps how many history messages are fetched (default 500).
+	MaxMessages int `json:"maxMessages,omitempty"`
+	// CharBudget caps the transcript size in characters; oldest messages
+	// are dropped first (default 80000).
+	CharBudget int `json:"charBudget,omitempty"`
+	// MaxImages caps how many images are downloaded for the agent
+	// (default 10, newest first).
+	MaxImages int `json:"maxImages,omitempty"`
+	// PromptTemplate overrides the built-in prompt. Placeholders:
+	// {{repo}}, {{count}}, {{extra}}, {{history}}.
+	PromptTemplate string `json:"promptTemplate,omitempty"`
+}
+
+// NewIssueMaxMessages returns the history fetch cap for /new-issue.
+func (c *Config) NewIssueMaxMessages() int {
+	if c.NewIssue != nil && c.NewIssue.MaxMessages > 0 {
+		return c.NewIssue.MaxMessages
+	}
+	return 500
+}
+
+// NewIssueCharBudget returns the transcript character budget for /new-issue.
+func (c *Config) NewIssueCharBudget() int {
+	if c.NewIssue != nil && c.NewIssue.CharBudget > 0 {
+		return c.NewIssue.CharBudget
+	}
+	return 80000
+}
+
+// NewIssueMaxImages returns the image download cap for /new-issue.
+func (c *Config) NewIssueMaxImages() int {
+	if c.NewIssue != nil && c.NewIssue.MaxImages > 0 {
+		return c.NewIssue.MaxImages
+	}
+	return 10
+}
+
+// NewIssuePromptTemplate returns the configured prompt template override,
+// "" meaning the built-in default.
+func (c *Config) NewIssuePromptTemplate() string {
+	if c.NewIssue != nil {
+		return c.NewIssue.PromptTemplate
+	}
+	return ""
 }
 
 // Defaults applied when fields are zero.

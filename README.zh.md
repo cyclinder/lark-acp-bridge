@@ -12,7 +12,7 @@ v1 提供 **Devin**（通过 Agent Client Protocol 驱动）；v1.1 增加 **Cod
   `codex exec --json`，GitHub Copilot 通过 `copilot -p --output-format json`）。
 - 将代理响应（文本、工具调用、用量）流式输出到一张实时更新的飞书卡片上。
 - 本地处理斜杠命令（零 token 消耗）：`/help`、`/new`、`/cd`、`/ws`、`/open`、
-  `/status`、`/pwd`、`/stop`、`/model`、`/provider`、`/resume`。
+  `/status`、`/pwd`、`/stop`、`/model`、`/provider`、`/resume`、`/new-issue`。
 - `/open` 创建（或复用）一个绑定到工作目录的飞书群，让一个项目拥有自己专属的
   多人聊天。
 - 按聊天保持会话连续性。
@@ -52,7 +52,8 @@ bridge 以自建应用身份通过 SDK 长连接（WebSocket）通道接入，�
 ### 3. 授予权限
 
 在 **权限管理** → **API 权限** 页面，添加以下 scope。前四个是 bridge 核心功能
-必需的；最后两个仅在 `/open`（创建群并添加成员）时需要。
+必需的；后面几个仅在 `/open`（创建群并添加成员）和 `/new-issue`（读取群历史
+消息及图片）时需要。
 
 | Scope | 用途 |
 |---|---|
@@ -62,6 +63,8 @@ bridge 以自建应用身份通过 SDK 长连接（WebSocket）通道接入，�
 | `im:message.reaction:write` | 对用户消息添加 "typing" 表情回应以示确认 |
 | `im:chat:create` | `/open`：创建绑定到工作目录的群 |
 | `im:chat:members:write` | `/open`：向创建的群添加用户 |
+| `im:message.group_msg` | `/new-issue`：读取群聊历史消息（敏感权限，管理员审批更严格） |
+| `im:resource` | `/new-issue`：下载历史消息中的图片 |
 
 添加 scope 后，点击 **创建版本** 并由租户管理员**审批**（如果是个人测试应用且
 你自己是管理员，可自行审批）。scope 只有在版本审批通过并发布后才生效。
@@ -191,6 +194,22 @@ Lark（国际版）应用将 `tenant` 设为 `"lark"`。`defaultProvider` 默认
 设为 `codex` 或 `copilot` 可将其设为默认。`codex` 和 `copilot` 块是可选的——
 省略即完全禁用这些 provider。
 
+可选的 `newIssue` 块用于调节 `/new-issue` 命令：
+
+```json
+  "newIssue": {
+    "maxMessages": 500,
+    "charBudget": 80000,
+    "maxImages": 10,
+    "promptTemplate": ""
+  }
+```
+
+`maxMessages` 限制拉取的历史消息条数，`charBudget` 限制记录文本总量（超出时
+优先丢弃最旧的消息），`maxImages` 限制下载的图片数量（优先最新）。
+`promptTemplate` 覆盖内置提示词，可使用 `{{repo}}`、`{{count}}`、`{{extra}}`、
+`{{history}}` 占位符。
+
 `copilot.permissions` 字段映射到 Copilot CLI 的审批标志：
 `"allow-all"`（`--allow-all`：工具、路径、URL 全部放行——默认值）、
 `"allow-all-tools"`（`--allow-all-tools`：工具自动审批，工作区外路径仍拒绝）、
@@ -266,6 +285,10 @@ sudo ./lark-acp-bridge uninstall
 在群聊中，机器人仅在被 @mention 时响应。在单聊中，每条普通消息都是一个 prompt。
 斜杠命令由本地处理，不消耗 token；只有普通消息会到达代理。
 
+**Owner 限制**：只有 bridge 的所有者可以运行代理和使用会改变状态的命令；其他
+用户只能使用 `/help`、`/status`、`/pwd`。所有者即应用的创建者，通过应用协作者
+列表自动识别；也可在配置顶层设置 `owner` 字段（open_id）覆盖。
+
 ## 斜杠命令
 
 所有命令均由 bridge 本地处理——它们不会调用代理子进程，也不消耗 token。
@@ -284,6 +307,7 @@ sudo ./lark-acp-bridge uninstall
 | `/model <N\|name>` | 切换模型（重置会话）；`<N>` 为 `/model` 列表的索引 |
 | `/provider` | 列出已注册 provider；`/provider <id>` 按聊天覆盖默认值，`/provider default` 恢复（切换会清除会话） |
 | `/resume` | 列出历史会话并用 `/resume <N>` 恢复其中一个 |
+| `/new-issue <repo> [--last N] [--since today\|24h\|7d] [附加说明]` | 拉取群聊近期消息（发言人匿名、图片下载到本地），交给 agent 理解并直接创建 GitHub issue：优先遵循仓库的 issue 模板，正文先英文后中文两个版本。`<repo>` 必填：`owner/repo`、GitHub URL 或项目名——仅给项目名时由 agent 定位官方主仓库（绝不选 fork），无法唯一确定时不创建 issue，回复候选列表请用户确认 |
 
 ## 架构
 
