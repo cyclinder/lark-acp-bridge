@@ -96,32 +96,47 @@ func (a *Adapter) Run(ctx context.Context, opts agent.RunOptions) (agent.Run, er
 		stopGrace = 5 * time.Second
 	}
 
-	args, err := buildArgs(opts, a.permissions, a.defaultModel)
+	spawn := func(sessionID string) (*exec.Cmd, io.ReadCloser, *agent.TailBuffer, error) {
+		o := opts
+		o.SessionID = sessionID
+		args, err := buildArgs(o, a.permissions, a.defaultModel)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		cmd := exec.Command(a.binary, args...)
+		cmd.Dir = opts.Cwd
+		cmd.Env = os.Environ()
+		// Stdin stays /dev/null: in -p mode Copilot reads piped stdin as extra
+		// prompt input, which we never want.
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("copilot stdout pipe: %w", err)
+		}
+		stderr := agent.NewTailBuffer(4096)
+		cmd.Stderr = stderr
+		if err := cmd.Start(); err != nil {
+			return nil, nil, nil, fmt.Errorf("start copilot: %w", err)
+		}
+		bridgetlog.Info("copilot", "spawn", fmt.Sprintf("pid=%d cwd=%s resume=%t", cmd.Process.Pid, opts.Cwd, sessionID != ""))
+		return cmd, stdout, stderr, nil
+	}
+	cmd, stdout, stderr, err := spawn(opts.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(a.binary, args...)
-	cmd.Dir = opts.Cwd
-	cmd.Env = os.Environ()
-	// Stdin stays /dev/null: in -p mode Copilot reads piped stdin as extra
-	// prompt input, which we never want.
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("copilot stdout pipe: %w", err)
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start copilot: %w", err)
-	}
-
-	bridgetlog.Info("copilot", "spawn", fmt.Sprintf("pid=%d cwd=%s resume=%t", cmd.Process.Pid, opts.Cwd, opts.SessionID != ""))
 
 	events := make(chan agent.Event, 64)
 	r := &copilotRun{
 		cmd:       cmd,
 		stdout:    stdout,
+		stderr:    stderr,
 		events:    events,
 		stopGrace: stopGrace,
+	}
+	if opts.SessionID != "" {
+		// A stored session id can go stale (copilot prunes old sessions);
+		// keep a fresh-session respawn on hand for one retry.
+		r.respawnFresh = func() (*exec.Cmd, io.ReadCloser, *agent.TailBuffer, error) { return spawn("") }
 	}
 	go r.pump(ctx)
 	return r, nil
@@ -171,83 +186,141 @@ func permissionFlags(permissions string) ([]string, error) {
 
 // copilotRun is one live copilot -p turn.
 type copilotRun struct {
+	mu        sync.Mutex
 	cmd       *exec.Cmd
 	stdout    io.ReadCloser
+	stderr    *agent.TailBuffer
+	stopped   bool
 	events    chan agent.Event
 	stopGrace time.Duration
-
-	stopOnce sync.Once
+	// respawnFresh restarts the turn without --resume; consumed (set to nil)
+	// on the single stale-session retry.
+	respawnFresh func() (*exec.Cmd, io.ReadCloser, *agent.TailBuffer, error)
 }
 
 func (r *copilotRun) Events() <-chan agent.Event { return r.events }
 
 func (r *copilotRun) Stop() error {
-	r.stopOnce.Do(func() {
-		// SIGTERM lets copilot flush; the pump goroutine waits up to stopGrace
-		// for the process to exit before emitting a terminal event.
-		if r.cmd.Process != nil {
-			_ = r.cmd.Process.Signal(syscall.SIGTERM)
-		}
-	})
+	// SIGTERM lets copilot flush; the pump goroutine waits up to stopGrace
+	// for the process to exit before emitting a terminal event.
+	r.mu.Lock()
+	r.stopped = true
+	p := r.cmd.Process
+	r.mu.Unlock()
+	if p != nil {
+		_ = p.Signal(syscall.SIGTERM)
+	}
 	return nil
 }
 
-func (r *copilotRun) Wait() error { return r.cmd.Wait() }
+func (r *copilotRun) Wait() error {
+	r.mu.Lock()
+	cmd := r.cmd
+	r.mu.Unlock()
+	return cmd.Wait()
+}
 
 // pump reads NDJSON events from stdout, translates them, and pushes agent
 // events onto the channel. On process exit it emits a terminal event (if the
-// stream did not already) and closes the channel.
+// stream did not already) and closes the channel. A resume spawn that dies
+// with no output at all (stale stored session) is retried once without
+// --resume.
 func (r *copilotRun) pump(ctx context.Context) {
 	defer close(r.events)
 
-	tr := newTranslator()
-	scanner := bufio.NewScanner(r.stdout)
-	// Copilot lines can be long (tool output); raise the per-line limit.
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for {
+		tr := newTranslator()
+		scanner := bufio.NewScanner(r.stdout)
+		// Copilot lines can be long (tool output); raise the per-line limit.
+		scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(strings.TrimSpace(string(line))) == 0 {
-			continue
-		}
-		for _, ev := range tr.translate(line) {
-			select {
-			case r.events <- ev:
-			case <-ctx.Done():
-				r.killAndFinish(tr, "cancelled")
+		sawOutput := false
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(strings.TrimSpace(string(line))) == 0 {
+				continue
+			}
+			sawOutput = true
+			for _, ev := range tr.translate(line) {
+				select {
+				case r.events <- ev:
+				case <-ctx.Done():
+					r.killAndFinish(tr, "cancelled")
+					return
+				}
+			}
+			if tr.terminal {
+				// Terminal event already pushed; wait for process exit.
+				r.waitForExit()
 				return
 			}
 		}
-		if tr.terminal {
-			// Terminal event already pushed; wait for process exit.
-			r.waitForExit()
+
+		// stdout closed before a terminal event: distinguish cancel from crash.
+		if ctx.Err() != nil {
+			r.killAndFinish(tr, "cancelled")
 			return
 		}
-	}
-
-	// stdout closed before a terminal event: distinguish cancel from crash.
-	if ctx.Err() != nil {
-		r.killAndFinish(tr, "cancelled")
-		return
-	}
-	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
-		r.events <- agent.Event{Type: agent.EventError, SessionID: tr.sessionID, Err: fmt.Errorf("copilot stdout read: %w", err)}
-		return
-	}
-	exitCode := r.waitForExit()
-	if exitCode != 0 && exitCode != -1 {
-		// Non-zero exit without a terminal event: surface as error unless the
-		// translator already emitted one (it sets `terminal`).
+		if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
+			r.events <- agent.Event{Type: agent.EventError, SessionID: tr.sessionID, Err: fmt.Errorf("copilot stdout read: %w", err)}
+			return
+		}
+		exitCode := r.waitForExit()
+		if exitCode != 0 && exitCode != -1 {
+			if !sawOutput && r.tryRespawnFresh() {
+				continue
+			}
+			// Non-zero exit without a terminal event: surface as error unless the
+			// translator already emitted one (it sets `terminal`).
+			if !tr.terminal {
+				msg := fmt.Sprintf("copilot exited with code %d", exitCode)
+				if s := r.stderr.String(); s != "" {
+					msg += ": " + s
+				}
+				r.events <- agent.Event{Type: agent.EventError, SessionID: tr.sessionID, Err: errors.New(msg)}
+			}
+			return
+		}
 		if !tr.terminal {
-			r.events <- agent.Event{Type: agent.EventError, SessionID: tr.sessionID, Err: fmt.Errorf("copilot exited with code %d", exitCode)}
+			for _, ev := range tr.finish("failed") {
+				r.events <- ev
+			}
 		}
 		return
 	}
-	if !tr.terminal {
-		for _, ev := range tr.finish("failed") {
-			r.events <- ev
-		}
+}
+
+// tryRespawnFresh restarts the turn without --resume after a resume spawn
+// produced no output and exited non-zero (the stored session no longer
+// exists on the copilot side). Returns true when a new process is running.
+func (r *copilotRun) tryRespawnFresh() bool {
+	r.mu.Lock()
+	respawn := r.respawnFresh
+	r.respawnFresh = nil
+	stopped := r.stopped
+	stderrTail := ""
+	if r.stderr != nil {
+		stderrTail = r.stderr.String()
 	}
+	r.mu.Unlock()
+	if respawn == nil || stopped {
+		return false
+	}
+	bridgetlog.Info("copilot", "resume-failed", fmt.Sprintf("stored session not resumable (%s); retrying with a fresh session", stderrTail))
+	cmd, stdout, stderr, err := respawn()
+	if err != nil {
+		bridgetlog.Error("copilot", "respawn", err.Error())
+		return false
+	}
+	r.mu.Lock()
+	r.cmd, r.stdout, r.stderr = cmd, stdout, stderr
+	stopped = r.stopped
+	r.mu.Unlock()
+	if stopped {
+		// /stop raced the respawn; tear the new process down immediately.
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+	}
+	return true
 }
 
 // killAndFinish SIGKILLs the process, reaps it, and emits a terminal event

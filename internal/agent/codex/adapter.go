@@ -89,33 +89,48 @@ func (a *Adapter) Run(ctx context.Context, opts agent.RunOptions) (agent.Run, er
 		stopGrace = 5 * time.Second
 	}
 
-	args := buildArgs(opts, a.sandbox, a.defaultModel)
-	cmd := exec.Command(a.binary, args...)
-	cmd.Dir = opts.Cwd
-	cmd.Env = os.Environ()
-	stdin, err := cmd.StdinPipe()
+	spawn := func(sessionID string) (*exec.Cmd, io.WriteCloser, io.ReadCloser, *agent.TailBuffer, error) {
+		o := opts
+		o.SessionID = sessionID
+		args := buildArgs(o, a.sandbox, a.defaultModel)
+		cmd := exec.Command(a.binary, args...)
+		cmd.Dir = opts.Cwd
+		cmd.Env = os.Environ()
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("codex stdin pipe: %w", err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("codex stdout pipe: %w", err)
+		}
+		stderr := agent.NewTailBuffer(4096)
+		cmd.Stderr = stderr
+		if err := cmd.Start(); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("start codex exec: %w", err)
+		}
+		bridgetlog.Info("codex", "spawn", fmt.Sprintf("pid=%d cwd=%s resume=%t", cmd.Process.Pid, opts.Cwd, sessionID != ""))
+		return cmd, stdin, stdout, stderr, nil
+	}
+	cmd, stdin, stdout, stderr, err := spawn(opts.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("codex stdin pipe: %w", err)
+		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("codex stdout pipe: %w", err)
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start codex exec: %w", err)
-	}
-
-	bridgetlog.Info("codex", "spawn", fmt.Sprintf("pid=%d cwd=%s resume=%t", cmd.Process.Pid, opts.Cwd, opts.SessionID != ""))
 
 	events := make(chan agent.Event, 64)
 	r := &codexRun{
-		cmd:        cmd,
-		stdin:      stdin,
-		stdout:     stdout,
-		events:     events,
-		prompt:     opts.Prompt,
-		stopGrace:  stopGrace,
+		cmd:       cmd,
+		stdin:     stdin,
+		stdout:    stdout,
+		stderr:    stderr,
+		events:    events,
+		prompt:    opts.Prompt,
+		stopGrace: stopGrace,
+	}
+	if opts.SessionID != "" {
+		// A stored thread id can go stale (codex prunes old rollouts); keep a
+		// fresh-session respawn on hand for one retry.
+		r.respawnFresh = func() (*exec.Cmd, io.WriteCloser, io.ReadCloser, *agent.TailBuffer, error) { return spawn("") }
 	}
 	go r.pump(ctx)
 	return r, nil
@@ -151,92 +166,150 @@ func buildArgs(opts agent.RunOptions, sandbox, defaultModel string) []string {
 
 // codexRun is one live codex exec turn.
 type codexRun struct {
+	mu        sync.Mutex
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	stdout    io.ReadCloser
+	stderr    *agent.TailBuffer
+	stopped   bool
 	events    chan agent.Event
 	prompt    string
 	stopGrace time.Duration
-
-	stopOnce sync.Once
+	// respawnFresh restarts the turn without `resume`; consumed (set to nil)
+	// on the single stale-session retry.
+	respawnFresh func() (*exec.Cmd, io.WriteCloser, io.ReadCloser, *agent.TailBuffer, error)
 }
 
 func (r *codexRun) Events() <-chan agent.Event { return r.events }
 
 func (r *codexRun) Stop() error {
-	r.stopOnce.Do(func() {
-		// SIGTERM lets codex flush; the pump goroutine waits up to stopGrace
-		// for the process to exit before emitting a terminal event.
-		if r.cmd.Process != nil {
-			_ = r.cmd.Process.Signal(syscall.SIGTERM)
-		}
-	})
+	// SIGTERM lets codex flush; the pump goroutine waits up to stopGrace
+	// for the process to exit before emitting a terminal event.
+	r.mu.Lock()
+	r.stopped = true
+	p := r.cmd.Process
+	r.mu.Unlock()
+	if p != nil {
+		_ = p.Signal(syscall.SIGTERM)
+	}
 	return nil
 }
 
-func (r *codexRun) Wait() error { return r.cmd.Wait() }
+func (r *codexRun) Wait() error {
+	r.mu.Lock()
+	cmd := r.cmd
+	r.mu.Unlock()
+	return cmd.Wait()
+}
 
 // pump writes the prompt to stdin, then reads NDJSON events from stdout,
 // translates them, and pushes agent events onto the channel. On process exit
 // it emits a terminal event (if the stream did not already) and closes the
-// channel.
+// channel. A resume spawn that dies with no output at all (stale stored
+// thread id) is retried once without `resume`.
 func (r *codexRun) pump(ctx context.Context) {
 	defer close(r.events)
 
-	// Write the prompt and close stdin so codex begins processing.
-	go func() {
-		_, _ = r.stdin.Write([]byte(r.prompt))
-		_ = r.stdin.Close()
-	}()
+	for {
+		// Write the prompt and close stdin so codex begins processing.
+		stdin := r.stdin
+		go func() {
+			_, _ = stdin.Write([]byte(r.prompt))
+			_ = stdin.Close()
+		}()
 
-	tr := newTranslator()
-	scanner := bufio.NewScanner(r.stdout)
-	// Codex lines can be long (tool output); raise the per-line limit.
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+		tr := newTranslator()
+		scanner := bufio.NewScanner(r.stdout)
+		// Codex lines can be long (tool output); raise the per-line limit.
+		scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(strings.TrimSpace(string(line))) == 0 {
-			continue
-		}
-		for _, ev := range tr.translate(line) {
-			select {
-			case r.events <- ev:
-			case <-ctx.Done():
-				r.killAndFinish(tr, "cancelled")
+		sawOutput := false
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(strings.TrimSpace(string(line))) == 0 {
+				continue
+			}
+			sawOutput = true
+			for _, ev := range tr.translate(line) {
+				select {
+				case r.events <- ev:
+				case <-ctx.Done():
+					r.killAndFinish(tr, "cancelled")
+					return
+				}
+			}
+			if tr.terminal {
+				// Terminal event already pushed; wait for process exit.
+				r.waitForExit()
 				return
 			}
 		}
-		if tr.terminal {
-			// Terminal event already pushed; wait for process exit.
-			r.waitForExit()
+
+		// stdout closed before a terminal event: distinguish cancel from crash.
+		if ctx.Err() != nil {
+			r.killAndFinish(tr, "cancelled")
 			return
 		}
-	}
-
-	// stdout closed before a terminal event: distinguish cancel from crash.
-	if ctx.Err() != nil {
-		r.killAndFinish(tr, "cancelled")
-		return
-	}
-	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
-		r.events <- agent.Event{Type: agent.EventError, SessionID: tr.threadID, Err: fmt.Errorf("codex stdout read: %w", err)}
-		return
-	}
-	exitCode := r.waitForExit()
-	if exitCode != 0 && exitCode != -1 {
-		// Non-zero exit without a terminal event: surface as error unless the
-		// translator already emitted one (it sets `terminal`).
+		if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
+			r.events <- agent.Event{Type: agent.EventError, SessionID: tr.threadID, Err: fmt.Errorf("codex stdout read: %w", err)}
+			return
+		}
+		exitCode := r.waitForExit()
+		if exitCode != 0 && exitCode != -1 {
+			if !sawOutput && r.tryRespawnFresh() {
+				continue
+			}
+			// Non-zero exit without a terminal event: surface as error unless the
+			// translator already emitted one (it sets `terminal`).
+			if !tr.terminal {
+				msg := fmt.Sprintf("codex exited with code %d", exitCode)
+				if s := r.stderr.String(); s != "" {
+					msg += ": " + s
+				}
+				r.events <- agent.Event{Type: agent.EventError, SessionID: tr.threadID, Err: errors.New(msg)}
+			}
+			return
+		}
 		if !tr.terminal {
-			r.events <- agent.Event{Type: agent.EventError, SessionID: tr.threadID, Err: fmt.Errorf("codex exited with code %d", exitCode)}
+			for _, ev := range tr.finish("failed") {
+				r.events <- ev
+			}
 		}
 		return
 	}
-	if !tr.terminal {
-		for _, ev := range tr.finish("failed") {
-			r.events <- ev
-		}
+}
+
+// tryRespawnFresh restarts the turn without `resume` after a resume spawn
+// produced no output and exited non-zero (the stored thread no longer exists
+// on the codex side). Returns true when a new process is running.
+func (r *codexRun) tryRespawnFresh() bool {
+	r.mu.Lock()
+	respawn := r.respawnFresh
+	r.respawnFresh = nil
+	stopped := r.stopped
+	stderrTail := ""
+	if r.stderr != nil {
+		stderrTail = r.stderr.String()
 	}
+	r.mu.Unlock()
+	if respawn == nil || stopped {
+		return false
+	}
+	bridgetlog.Info("codex", "resume-failed", fmt.Sprintf("stored thread not resumable (%s); retrying with a fresh session", stderrTail))
+	cmd, stdin, stdout, stderr, err := respawn()
+	if err != nil {
+		bridgetlog.Error("codex", "respawn", err.Error())
+		return false
+	}
+	r.mu.Lock()
+	r.cmd, r.stdin, r.stdout, r.stderr = cmd, stdin, stdout, stderr
+	stopped = r.stopped
+	r.mu.Unlock()
+	if stopped {
+		// /stop raced the respawn; tear the new process down immediately.
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+	}
+	return true
 }
 
 // killAndFinish SIGKILLs the process, reaps it, and emits a terminal event
