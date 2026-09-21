@@ -55,6 +55,11 @@ func renderUnit(execStart, configPath string, userScope bool) string {
 	b.WriteString("ExecStart=" + execStart + "\n")
 	b.WriteString("Restart=on-failure\n")
 	b.WriteString("RestartSec=5\n")
+	// systemd does not set HOME unless User= is present; agent CLIs (copilot,
+	// gh, codex) need it to locate their credentials and config.
+	if home, err := os.UserHomeDir(); err == nil {
+		b.WriteString(fmt.Sprintf("Environment=HOME=%s\n", home))
+	}
 	if configPath != "" {
 		b.WriteString(fmt.Sprintf("Environment=LARK_ACP_BRIDGE_MANAGED_BY=systemd\n"))
 		b.WriteString(fmt.Sprintf("Environment=LARK_ACP_BRIDGE_UNIT=%s\n", UnitName))
