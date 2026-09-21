@@ -47,6 +47,30 @@ type newIssueOpts struct {
 	Extra string    // free-form extra instructions for the agent
 }
 
+// normalizeFlagToken canonicalizes mobile-friendly spellings of the --last
+// and --since flags. Phone keyboards often turn "--" into an em/en dash, and
+// typing dashes at all is awkward, so "—last 200", "–since=24h", "last:200",
+// and "since:today" all normalize to the canonical "--flag=value" form.
+// Anything that does not look like one of the two flags is returned as is.
+func normalizeFlagToken(tok string) string {
+	core := strings.TrimLeft(tok, "-—–−")
+	dashed := core != tok
+	name, val := core, ""
+	if i := strings.IndexAny(core, ":="); i >= 0 {
+		name, val = core[:i], core[i:]
+	}
+	if name != "last" && name != "since" {
+		return tok
+	}
+	if !dashed && val == "" {
+		return tok // bare "last"/"since" without dashes stays free text
+	}
+	if val != "" {
+		val = "=" + val[1:]
+	}
+	return "--" + name + val
+}
+
 // parseNewIssueArgs parses `/new-issue <repo> [--last N] [--since today|Nh|Nd]
 // [extra...]`. The first positional token is the repository reference; the
 // rest are extra instructions. now anchors relative --since values.
@@ -55,7 +79,7 @@ func parseNewIssueArgs(args string, now time.Time) (newIssueOpts, error) {
 	toks := strings.Fields(args)
 	var extra []string
 	for i := 0; i < len(toks); i++ {
-		tok := toks[i]
+		tok := normalizeFlagToken(toks[i])
 		switch {
 		case tok == "--last" || strings.HasPrefix(tok, "--last="):
 			val := strings.TrimPrefix(tok, "--last=")
@@ -264,7 +288,8 @@ func handleNewIssue(args string, ctx *Context) error {
 	opts, err := parseNewIssueArgs(args, time.Now())
 	if err != nil || opts.Repo == "" {
 		usage := "Usage: `/new-issue <repo> [--last N] [--since today|24h|7d] [extra notes]`\n" +
-			"`<repo>` is required: `owner/repo`, a GitHub URL, or a project name (the agent locates the upstream repo and asks back when ambiguous)."
+			"`<repo>` is required: `owner/repo`, a GitHub URL, or a project name (the agent locates the upstream repo and asks back when ambiguous).\n" +
+			"On mobile you can skip the dashes: `last:200` and `since:24h` work too."
 		if err != nil {
 			usage += fmt.Sprintf("\n%s", err)
 		}
