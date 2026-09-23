@@ -139,8 +139,8 @@ func HelpCard(agentName string, agentCommands []string) Card {
 		for _, e := range entries {
 			n++
 			b.WriteString(fmt.Sprintf("**%d.** %s\n", n, i18n.T(e.cmd)))
-			for _, ex := range e.examples {
-				b.WriteString("　　")
+			for i, ex := range e.examples {
+				b.WriteString(fmt.Sprintf("　　%c. ", 'a'+i))
 				b.WriteString(i18n.T(ex))
 				b.WriteByte('\n')
 			}
