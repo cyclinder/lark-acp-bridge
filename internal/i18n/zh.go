@@ -107,6 +107,9 @@ var zh = map[string]string{
 	"`/pwd` — print the current working directory":                          "`/pwd`（/当前目录）— 显示当前工作目录",
 	"`/stop` — stop the active run":                          "`/stop`（/停止）— 停止当前运行",
 	"`/new-issue <repo> [--last N] [--since today|24h|7d]` — turn recent group messages into a GitHub issue in the given repo": "`/new-issue <仓库> [--last N] [--since today|24h|7d]`（/新建议题）— 将近期群消息整理成指定仓库的 GitHub issue",
+	"↳ e.g. `/new-issue spidernet-io/spiderpool --last 100 focus on the RDMA discussion`": "↳ 例如：`/new-issue spidernet-io/spiderpool --last 100 重点看 RDMA 的讨论`",
+	"↳ e.g. `/cd ~/projects/spiderpool`":                     "↳ 例如：`/cd ~/projects/spiderpool`",
+	"↳ e.g. `/ws save spiderpool`, later `/ws use spiderpool`": "↳ 例如：`/ws save spiderpool`，之后 `/ws use spiderpool`",
 	"`/provider` — list providers; `/provider <id>` to switch, `/provider default` to reset":                                   "`/provider`（/提供方）— 列出提供方；`/provider <id>` 切换，`/provider default` 重置",
 	"`/help` — this help": "`/help`（/帮助）— 显示本帮助",
 

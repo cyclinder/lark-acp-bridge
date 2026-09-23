@@ -155,14 +155,17 @@ func HelpCard(agentName string, agentCommands []string) Card {
 
 var frequentHelpCommands = []string{
 	"`/new-issue <repo> [--last N] [--since today|24h|7d]` — turn recent group messages into a GitHub issue in the given repo",
+	"↳ e.g. `/new-issue spidernet-io/spiderpool --last 100 focus on the RDMA discussion`",
 	"`/new` `/reset` — clear the current chat session",
 	"`/status` — show current state",
 }
 
 var workspaceHelpCommands = []string{
 	"`/cd <path>` — switch working directory (resets session)",
+	"↳ e.g. `/cd ~/projects/spiderpool`",
 	"`/pwd` — print the current working directory",
 	"`/ws` — manage named workspace aliases (`/ws save|use|remove <name>`)",
+	"↳ e.g. `/ws save spiderpool`, later `/ws use spiderpool`",
 	"`/open [path]` — create/reuse a group bound to a cwd (p2p only)",
 }
 
