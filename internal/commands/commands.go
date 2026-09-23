@@ -282,9 +282,9 @@ func handleStop(_ string, ctx *Context) error {
 
 func handleHelp(_ string, ctx *Context) error {
 	agentCommands := []string{
-		i18n.T("`/model` — list available models (current marked); `/model N|name` switches"),
-		i18n.T("`/resume` — list saved sessions; `/resume N` to reconnect one"),
-		i18n.T("`/sessions` — list provider sessions; `/sessions N` to continue one"),
+		"/model — list available models (current marked); /model N|name switches",
+		"/resume — list saved sessions; /resume N to reconnect one",
+		"/sessions — list provider sessions; /sessions N to continue one",
 	}
 	c := card.HelpCard(ctx.Adapter.DisplayName(), agentCommands)
 	return sendCard(ctx, c)

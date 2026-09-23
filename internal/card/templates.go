@@ -125,17 +125,25 @@ func shell(title string, elements []Element) Card {
 // --- help card ------------------------------------------------------------
 
 // HelpCard builds the dynamic /help card. Bridge commands are always shown,
-// grouped by frequency of use; agentCommands (model/session commands specific
-// to the selected provider) are merged into the session group and shown only
-// when a provider is selected (always in v1).
+// grouped by frequency of use and numbered continuously; agentCommands
+// (model/session commands specific to the selected provider) are merged into
+// the session group and shown only when a provider is selected (always in v1).
+// Command lines avoid inline code markup because Feishu clients render
+// backtick-heavy lines poorly; examples sit on an indented line below.
 func HelpCard(agentName string, agentCommands []string) Card {
 	var b strings.Builder
-	section := func(header string, lines []string) {
+	n := 0
+	section := func(header string, entries []helpEntry) {
 		b.WriteString(i18n.T(header))
 		b.WriteByte('\n')
-		for _, l := range lines {
-			b.WriteString(i18n.T(l))
-			b.WriteByte('\n')
+		for _, e := range entries {
+			n++
+			b.WriteString(fmt.Sprintf("**%d.** %s\n", n, i18n.T(e.cmd)))
+			if e.example != "" {
+				b.WriteString("　　")
+				b.WriteString(i18n.T(e.example))
+				b.WriteByte('\n')
+			}
 		}
 		b.WriteByte('\n')
 	}
@@ -143,35 +151,50 @@ func HelpCard(agentName string, agentCommands []string) Card {
 	b.WriteString("\n\n")
 	section("🔥 **Frequent**", frequentHelpCommands)
 	section("📁 **Workspace**", workspaceHelpCommands)
-	sessionLines := make([]string, 0, len(sessionHelpCommands)+len(agentCommands))
-	sessionLines = append(sessionLines, sessionHelpCommands...)
-	sessionLines = append(sessionLines, agentCommands...)
-	section("🧠 **Session & model**", sessionLines)
-	b.WriteString(i18n.T("`/help` — this help"))
+	sessionEntries := make([]helpEntry, 0, len(sessionHelpCommands)+len(agentCommands))
+	sessionEntries = append(sessionEntries, sessionHelpCommands...)
+	for _, c := range agentCommands {
+		sessionEntries = append(sessionEntries, helpEntry{cmd: c})
+	}
+	section("🧠 **Session & model**", sessionEntries)
+	b.WriteString(i18n.T("/help — this help"))
 	b.WriteByte('\n')
 	b.WriteString(fmt.Sprintf(i18n.T("Anything else is sent to %s as a prompt."), agentName))
 	return shell(i18n.T("Help"), []Element{markdown(b.String())})
 }
 
-var frequentHelpCommands = []string{
-	"`/new-issue <repo> [--last N] [--since today|24h|7d]` — turn recent group messages into a GitHub issue in the given repo",
-	"↳ e.g. `/new-issue spidernet-io/spiderpool --last 100 focus on the RDMA discussion`",
-	"`/new` `/reset` — clear the current chat session",
-	"`/status` — show current state",
+// helpEntry is one numbered command line in the /help card, with an
+// optional example rendered indented on the next line.
+type helpEntry struct {
+	cmd     string
+	example string
 }
 
-var workspaceHelpCommands = []string{
-	"`/cd <path>` — switch working directory (resets session)",
-	"↳ e.g. `/cd ~/projects/spiderpool`",
-	"`/pwd` — print the current working directory",
-	"`/ws` — manage named workspace aliases (`/ws save|use|remove <name>`)",
-	"↳ e.g. `/ws save spiderpool`, later `/ws use spiderpool`",
-	"`/open [path]` — create/reuse a group bound to a cwd (p2p only)",
+var frequentHelpCommands = []helpEntry{
+	{
+		cmd:     "/new-issue <repo> [--last N] [--since today|24h|7d] — turn recent group messages into a GitHub issue in the given repo",
+		example: "e.g. /new-issue spidernet-io/spiderpool --last 100 focus on the RDMA discussion",
+	},
+	{cmd: "/new /reset — clear the current chat session"},
+	{cmd: "/status — show current state"},
 }
 
-var sessionHelpCommands = []string{
-	"`/stop` — stop the active run",
-	"`/provider` — list providers; `/provider <id>` to switch, `/provider default` to reset",
+var workspaceHelpCommands = []helpEntry{
+	{
+		cmd:     "/cd <path> — switch working directory (resets session)",
+		example: "e.g. /cd ~/projects/spiderpool",
+	},
+	{cmd: "/pwd — print the current working directory"},
+	{
+		cmd:     "/ws — manage named workspace aliases (/ws save|use|remove <name>)",
+		example: "e.g. /ws save spiderpool, later /ws use spiderpool",
+	},
+	{cmd: "/open [path] — create/reuse a group bound to a cwd (p2p only)"},
+}
+
+var sessionHelpCommands = []helpEntry{
+	{cmd: "/stop — stop the active run"},
+	{cmd: "/provider — list providers; /provider <id> to switch, /provider default to reset"},
 }
 
 // --- status card ----------------------------------------------------------
