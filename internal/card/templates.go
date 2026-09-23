@@ -43,16 +43,16 @@ type CardText struct {
 // they are visually distinct from the agent's prose and don't rely on
 // lark_md's limited blockquote/code-fence support).
 type Element struct {
-	Tag             string    `json:"tag"`
-	Content         string    `json:"content,omitempty"`
-	Text            *CardText `json:"text,omitempty"`
-	Elements        []Element `json:"elements,omitempty"`
-	Expanded        bool      `json:"expanded,omitempty"`
+	Tag             string       `json:"tag"`
+	Content         string       `json:"content,omitempty"`
+	Text            *CardText    `json:"text,omitempty"`
+	Elements        []Element    `json:"elements,omitempty"`
+	Expanded        bool         `json:"expanded,omitempty"`
 	Header          *PanelHeader `json:"header,omitempty"`
 	Border          *PanelBorder `json:"border,omitempty"`
-	VerticalSpacing string    `json:"vertical_spacing,omitempty"`
-	Padding         string    `json:"padding,omitempty"`
-	TextSize        string    `json:"text_size,omitempty"`
+	VerticalSpacing string       `json:"vertical_spacing,omitempty"`
+	Padding         string       `json:"padding,omitempty"`
+	TextSize        string       `json:"text_size,omitempty"`
 }
 
 // PanelHeader is the header of a collapsible_panel.
@@ -63,7 +63,7 @@ type PanelHeader struct {
 
 // PanelBorder is the border styling of a collapsible_panel.
 type PanelBorder struct {
-	Color       string `json:"color,omitempty"`
+	Color        string `json:"color,omitempty"`
 	CornerRadius string `json:"corner_radius,omitempty"`
 }
 
@@ -139,9 +139,9 @@ func HelpCard(agentName string, agentCommands []string) Card {
 		for _, e := range entries {
 			n++
 			b.WriteString(fmt.Sprintf("**%d.** %s\n", n, i18n.T(e.cmd)))
-			if e.example != "" {
+			for _, ex := range e.examples {
 				b.WriteString("　　")
-				b.WriteString(i18n.T(e.example))
+				b.WriteString(i18n.T(ex))
 				b.WriteByte('\n')
 			}
 		}
@@ -163,17 +163,21 @@ func HelpCard(agentName string, agentCommands []string) Card {
 	return shell(i18n.T("Help"), []Element{markdown(b.String())})
 }
 
-// helpEntry is one numbered command line in the /help card, with an
-// optional example rendered indented on the next line.
+// helpEntry is one numbered command line in the /help card, with
+// optional example lines rendered indented below it.
 type helpEntry struct {
-	cmd     string
-	example string
+	cmd      string
+	examples []string
 }
 
 var frequentHelpCommands = []helpEntry{
 	{
-		cmd:     "/new-issue <repo> [--last N] [--since today|24h|7d] — turn recent group messages into a GitHub issue in the given repo",
-		example: "e.g. /new-issue spidernet-io/spiderpool --last 100 focus on the RDMA discussion",
+		cmd: "/new-issue <repo> [--last N] [--since today|24h|7d] [extra prompt] — summarize recent group messages into a GitHub issue",
+		examples: []string{
+			"/new-issue spidernet-io/spiderpool — collect the latest 500 group messages, auto-summarize and file an issue (default)",
+			"/new-issue spidernet-io/spiderpool --last 100 — collect only the last 100 messages",
+			"/new-issue spidernet-io/spiderpool focus on the RDMA discussion — extra free text guides the summary",
+		},
 	},
 	{cmd: "/new /reset — clear the current chat session"},
 	{cmd: "/status — show current state"},
@@ -181,13 +185,13 @@ var frequentHelpCommands = []helpEntry{
 
 var workspaceHelpCommands = []helpEntry{
 	{
-		cmd:     "/cd <path> — switch working directory (resets session)",
-		example: "e.g. /cd ~/projects/spiderpool",
+		cmd:      "/cd <path> — switch working directory (resets session)",
+		examples: []string{"e.g. /cd ~/projects/spiderpool"},
 	},
 	{cmd: "/pwd — print the current working directory"},
 	{
-		cmd:     "/ws — manage named workspace aliases (/ws save|use|remove <name>)",
-		example: "e.g. /ws save spiderpool, later /ws use spiderpool",
+		cmd:      "/ws — manage named workspace aliases (/ws save|use|remove <name>)",
+		examples: []string{"e.g. /ws save spiderpool, later /ws use spiderpool"},
 	},
 	{cmd: "/open [path] — create/reuse a group bound to a cwd (p2p only)"},
 }
@@ -517,15 +521,15 @@ const (
 // turn, and the agent's final message naturally lands at the bottom (instead
 // of being pushed up by a separate "Tools" section appended after the text).
 type RunState struct {
-	status     runStatus
-	phase      runPhase
-	blocks     []block
-	planText   string // current plan snapshot (replaced, not appended)
-	planDropped bool  // true when an earlier plan snapshot was truncated
-	usage      *usageEntry
-	sessionID  string
-	stopReason string
-	errMsg     string
+	status      runStatus
+	phase       runPhase
+	blocks      []block
+	planText    string // current plan snapshot (replaced, not appended)
+	planDropped bool   // true when an earlier plan snapshot was truncated
+	usage       *usageEntry
+	sessionID   string
+	stopReason  string
+	errMsg      string
 
 	// Heartbeat bookkeeping. startedAt is set at creation; lastActivityAt
 	// and lastActivity are updated on every Reduce so the card can show
@@ -561,10 +565,10 @@ const (
 type runPhase int
 
 const (
-	phaseThinking runPhase = iota // no events yet, or between steps
-	phasePlanning                 // agent emitted a plan/reasoning chunk
-	phaseToolRunning              // a tool call is in flight
-	phaseWriting                  // agent is streaming message text
+	phaseThinking    runPhase = iota // no events yet, or between steps
+	phasePlanning                    // agent emitted a plan/reasoning chunk
+	phaseToolRunning                 // a tool call is in flight
+	phaseWriting                     // agent is streaming message text
 )
 
 type toolEntry struct {
