@@ -94,7 +94,7 @@ var zh = map[string]string{
 
 	// --- card: help ---------------------------------------------------------
 	"Help": "帮助",
-	"_All commands are handled locally and cost no tokens._": "_所有命令均由桥接本地处理，不消耗 token。_",
+	"_Chat in Feishu and let a local AI agent do the work for you._": "_在飞书里聊天，让本地 AI Agent 替你干活。_",
 	"🔥 **Frequent**":                          "🔥 **常用**",
 	"📁 **Workspace**":                         "📁 **工作区**",
 	"🧠 **Session & model**":                   "🧠 **会话与模型**",

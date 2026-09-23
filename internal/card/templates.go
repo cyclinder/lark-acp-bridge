@@ -139,7 +139,7 @@ func HelpCard(agentName string, agentCommands []string) Card {
 		}
 		b.WriteByte('\n')
 	}
-	b.WriteString(i18n.T("_All commands are handled locally and cost no tokens._"))
+	b.WriteString(i18n.T("_Chat in Feishu and let a local AI agent do the work for you._"))
 	b.WriteString("\n\n")
 	section("🔥 **Frequent**", frequentHelpCommands)
 	section("📁 **Workspace**", workspaceHelpCommands)
