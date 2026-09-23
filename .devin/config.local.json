@@ -7,7 +7,25 @@
       "Exec(ls)",
       "Exec(devin)",
       "Exec(tail)",
-      "Exec(go vet)"
+      "Exec(go vet)",
+      "Exec(journalctl)",
+      "Exec(git status)",
+      "Exec(git log)",
+      "Exec(copilot)",
+      "Exec(gofmt)",
+      "Exec(git stash)",
+      "Exec(git show)",
+      "Exec(printf)",
+      "Exec(go test)",
+      "Exec(systemctl)",
+      "Exec(sed)",
+      "Exec(/usr/local/bin/lark-acp-bridge)",
+      "Exec(env)",
+      "Exec(/tmp/lark-acp-bridge status)",
+      "Exec(install)",
+      "Exec(cmp)",
+      "Exec(git add)",
+      "Exec(git commit)"
     ]
   }
 }

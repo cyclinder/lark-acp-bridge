@@ -174,9 +174,9 @@ var frequentHelpCommands = []helpEntry{
 	{
 		cmd: "/new-issue <repo> [--last N] [--since today|24h|7d] [extra prompt] — summarize recent group messages into a GitHub issue",
 		examples: []string{
-			"/new-issue spidernet-io/spiderpool — collect the latest 500 group messages, auto-summarize and file an issue (default)",
-			"/new-issue spidernet-io/spiderpool --last 100 — collect only the last 100 messages",
-			"/new-issue spidernet-io/spiderpool focus on the RDMA discussion — extra free text guides the summary",
+			"Collect the latest 500 group messages, auto-summarize and file an issue (default): /new-issue spidernet-io/spiderpool",
+			"Collect only the last 100 messages: /new-issue spidernet-io/spiderpool --last 100",
+			"Extra free text guides the summary: /new-issue spidernet-io/spiderpool focus on the RDMA discussion",
 		},
 	},
 	{cmd: "/new /reset — clear the current chat session"},
