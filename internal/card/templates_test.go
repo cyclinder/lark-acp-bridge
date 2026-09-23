@@ -399,12 +399,12 @@ func TestModelsCardSequence(t *testing.T) {
 	}
 }
 
-func TestHelpCardContainsBothSections(t *testing.T) {
+func TestHelpCardContainsGroupedSections(t *testing.T) {
 	c := HelpCard("Devin", []string{"`/model` — list models"})
 	if c.Header.Title.Content != "Help" {
 		t.Errorf("title = %q, want Help", c.Header.Title.Content)
 	}
-	// Find the markdown element and check it mentions both sections.
+	// Find the markdown element and check it mentions all groups.
 	var md string
 	for _, el := range c.Elements {
 		if el.Tag == "markdown" {
@@ -415,12 +415,18 @@ func TestHelpCardContainsBothSections(t *testing.T) {
 	if md == "" {
 		t.Fatal("no markdown element found")
 	}
-	// Both section headers should be present.
-	if !contains(md, "Bridge commands") {
-		t.Error("missing Bridge commands section")
+	// All group headers should be present, frequent first.
+	for _, header := range []string{"Frequent", "Workspace", "Session & model"} {
+		if !contains(md, header) {
+			t.Errorf("missing %s section", header)
+		}
 	}
-	if !contains(md, "Devin commands") {
-		t.Error("missing Devin commands section")
+	if indexOf(md, "Frequent") > indexOf(md, "Workspace") {
+		t.Error("Frequent group should come before Workspace")
+	}
+	// The provider's own commands are merged into the session group.
+	if !contains(md, "`/model` — list models") {
+		t.Error("missing agent command line")
 	}
 }
 

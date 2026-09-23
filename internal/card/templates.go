@@ -124,40 +124,51 @@ func shell(title string, elements []Element) Card {
 
 // --- help card ------------------------------------------------------------
 
-// HelpCard builds the dynamic /help card. Bridge commands are always shown;
-// agentCommands are shown only when a provider is selected (always in v1).
+// HelpCard builds the dynamic /help card. Bridge commands are always shown,
+// grouped by frequency of use; agentCommands (model/session commands specific
+// to the selected provider) are merged into the session group and shown only
+// when a provider is selected (always in v1).
 func HelpCard(agentName string, agentCommands []string) Card {
 	var b strings.Builder
-	b.WriteString(i18n.T("**Bridge commands** (always available, no token cost):"))
-	b.WriteByte('\n')
-	for _, c := range bridgeHelpCommands {
-		b.WriteString(i18n.T(c))
+	section := func(header string, lines []string) {
+		b.WriteString(i18n.T(header))
+		b.WriteByte('\n')
+		for _, l := range lines {
+			b.WriteString(i18n.T(l))
+			b.WriteByte('\n')
+		}
 		b.WriteByte('\n')
 	}
-	b.WriteByte('\n')
-	b.WriteString(fmt.Sprintf(i18n.T("**%s commands** (no token cost):"), agentName))
-	b.WriteByte('\n')
-	for _, c := range agentCommands {
-		b.WriteString(c)
-		b.WriteByte('\n')
-	}
+	b.WriteString(i18n.T("_All commands are handled locally and cost no tokens._"))
+	b.WriteString("\n\n")
+	section("🔥 **Frequent**", frequentHelpCommands)
+	section("📁 **Workspace**", workspaceHelpCommands)
+	sessionLines := make([]string, 0, len(sessionHelpCommands)+len(agentCommands))
+	sessionLines = append(sessionLines, sessionHelpCommands...)
+	sessionLines = append(sessionLines, agentCommands...)
+	section("🧠 **Session & model**", sessionLines)
+	b.WriteString(i18n.T("`/help` — this help"))
 	b.WriteByte('\n')
 	b.WriteString(fmt.Sprintf(i18n.T("Anything else is sent to %s as a prompt."), agentName))
 	return shell(i18n.T("Help"), []Element{markdown(b.String())})
 }
 
-var bridgeHelpCommands = []string{
+var frequentHelpCommands = []string{
+	"`/new-issue <repo> [--last N] [--since today|24h|7d]` — turn recent group messages into a GitHub issue in the given repo",
 	"`/new` `/reset` — clear the current chat session",
+	"`/status` — show current state",
+}
+
+var workspaceHelpCommands = []string{
 	"`/cd <path>` — switch working directory (resets session)",
+	"`/pwd` — print the current working directory",
 	"`/ws` — manage named workspace aliases (`/ws save|use|remove <name>`)",
 	"`/open [path]` — create/reuse a group bound to a cwd (p2p only)",
-	"`/status` — show current state",
-	"`/pwd` — print the current working directory",
+}
+
+var sessionHelpCommands = []string{
 	"`/stop` — stop the active run",
-	"`/resume` — list and resume past sessions",
-	"`/new-issue <repo> [--last N] [--since today|24h|7d]` — turn recent group messages into a GitHub issue in the given repo",
 	"`/provider` — list providers; `/provider <id>` to switch, `/provider default` to reset",
-	"`/help` — this help",
 }
 
 // --- status card ----------------------------------------------------------
