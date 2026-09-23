@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cognition/lark-acp-bridge/internal/i18n"
 )
 
 // HistoryMessage is a minimal projection of one Lark chat message used to
@@ -282,14 +284,14 @@ func renderNewIssuePrompt(template, repo, extra, history string, count int) stri
 func handleNewIssue(args string, ctx *Context) error {
 	if ctx.History == nil || ctx.StartRun == nil {
 		return ctx.Sender.SendMarkdown(ctx.ChatID,
-			"`/new-issue` is not available: the bridge is missing chat history access (grant `im:message.group_msg` and `im:resource`).",
+			i18n.T("`/new-issue` is not available: the bridge is missing chat history access (grant `im:message.group_msg` and `im:resource`)."),
 			ctx.MessageID)
 	}
 	opts, err := parseNewIssueArgs(args, time.Now())
 	if err != nil || opts.Repo == "" {
-		usage := "Usage: `/new-issue <repo> [--last N] [--since today|24h|7d] [extra notes]`\n" +
+		usage := i18n.T("Usage: `/new-issue <repo> [--last N] [--since today|24h|7d] [extra notes]`\n" +
 			"`<repo>` is required: `owner/repo`, a GitHub URL, or a project name (the agent locates the upstream repo and asks back when ambiguous).\n" +
-			"On mobile you can skip the dashes: `last:200` and `since:24h` work too."
+			"On mobile you can skip the dashes: `last:200` and `since:24h` work too.")
 		if err != nil {
 			usage += fmt.Sprintf("\n%s", err)
 		}
@@ -311,11 +313,11 @@ func handleNewIssue(args string, ctx *Context) error {
 	}
 	msgs, err := ctx.History.ListMessages(ctx.ChatID, limit, opts.Since)
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Failed to fetch chat history: %s", err), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Failed to fetch chat history: %s"), err), ctx.MessageID)
 	}
 	imgDir, err := os.MkdirTemp("", "lark-new-issue-*")
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Failed to create image dir: %s", err), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Failed to create image dir: %s"), err), ctx.MessageID)
 	}
 	fetch := func(messageID, key string) (string, bool) {
 		p, err := ctx.History.DownloadImage(messageID, key, imgDir)
@@ -324,17 +326,17 @@ func handleNewIssue(args string, ctx *Context) error {
 	history, count, images := buildTranscript(msgs, ctx.Config.NewIssueCharBudget(), ctx.Config.NewIssueMaxImages(), fetch)
 	if count == 0 {
 		_ = os.RemoveAll(imgDir)
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "No usable messages found in this chat's history.", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("No usable messages found in this chat's history."), ctx.MessageID)
 	}
 	prompt := renderNewIssuePrompt(ctx.Config.NewIssuePromptTemplate(), opts.Repo, opts.Extra, history, count)
-	note := fmt.Sprintf("Collected %d messages", count)
+	note := fmt.Sprintf(i18n.T("Collected %d messages"), count)
 	if images > 0 {
-		note += fmt.Sprintf(" and %d images", images)
+		note += fmt.Sprintf(i18n.T(" and %d images"), images)
 	}
 	if len(msgs) == limit {
-		note += fmt.Sprintf(" (fetch limit %d reached)", limit)
+		note += fmt.Sprintf(i18n.T(" (fetch limit %d reached)"), limit)
 	}
-	note += "; generating the issue…"
+	note += i18n.T("; generating the issue…")
 	if err := ctx.Sender.SendMarkdown(ctx.ChatID, note, ctx.MessageID); err != nil {
 		return err
 	}

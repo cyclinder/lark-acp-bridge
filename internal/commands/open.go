@@ -4,12 +4,14 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/cognition/lark-acp-bridge/internal/chatbind"
+	"github.com/cognition/lark-acp-bridge/internal/i18n"
 	"github.com/cognition/lark-acp-bridge/internal/workspace"
 )
 
@@ -29,12 +31,12 @@ import (
 func handleOpen(args string, ctx *Context) error {
 	if ctx.ChatMode != "p2p" {
 		return ctx.Sender.SendMarkdown(ctx.ChatID,
-			"Please use `/open` in a direct message with the bot.",
+			i18n.T("Please use `/open` in a direct message with the bot."),
 			ctx.MessageID)
 	}
 	if ctx.ChatAdmin == nil || ctx.ChatBinds == nil {
 		return ctx.Sender.SendMarkdown(ctx.ChatID,
-			"Group creation is not configured on this bridge.",
+			i18n.T("Group creation is not configured on this bridge."),
 			ctx.MessageID)
 	}
 
@@ -55,7 +57,7 @@ func handleOpen(args string, ctx *Context) error {
 		if ctx.ChatAdmin.GroupExists(existingID) {
 			if err := ctx.ChatAdmin.EnsureMember(existingID, ctx.SenderID); err != nil {
 				_ = ctx.Sender.SendMarkdown(ctx.ChatID,
-					fmt.Sprintf("Existing group **%s** is still around but I could not add you back: %s. Creating a new group instead.", b.Name, err),
+					fmt.Sprintf(i18n.T("Existing group **%s** is still around but I could not add you back: %s. Creating a new group instead."), b.Name, err),
 					ctx.MessageID)
 				reuse = false
 			}
@@ -68,9 +70,9 @@ func handleOpen(args string, ctx *Context) error {
 			}
 			inheritProviderModel(ctx, existingID)
 			_ = ctx.Sender.SendMarkdown(existingID,
-				fmt.Sprintf("Welcome back. This group is bound to `%s`.", cwd), "")
+				fmt.Sprintf(i18n.T("Welcome back. This group is bound to `%s`."), cwd), "")
 			return ctx.Sender.SendMarkdown(ctx.ChatID,
-				fmt.Sprintf("Reused existing group **%s** for `%s`.", b.Name, cwd),
+				fmt.Sprintf(i18n.T("Reused existing group **%s** for `%s`."), b.Name, cwd),
 				ctx.MessageID)
 		}
 		// Stale or unusable bind — remove the record so the name can be
@@ -89,7 +91,7 @@ func handleOpen(args string, ctx *Context) error {
 			// Group exists but can't add the user — fall through to
 			// create so they get a fresh group they can actually join.
 			_ = ctx.Sender.SendMarkdown(ctx.ChatID,
-				fmt.Sprintf("Found an existing group **%s** on Feishu but could not add you: %s. Creating a new group instead.", foundName, err),
+				fmt.Sprintf(i18n.T("Found an existing group **%s** on Feishu but could not add you: %s. Creating a new group instead."), foundName, err),
 				ctx.MessageID)
 		} else {
 			// Reuse the found group: record the bind, set cwd, inherit.
@@ -100,7 +102,7 @@ func handleOpen(args string, ctx *Context) error {
 				CreatedAt: time.Now().Unix(),
 			}); err != nil {
 				_ = ctx.Sender.SendMarkdown(ctx.ChatID,
-					fmt.Sprintf("Reused existing group **%s** but failed to record the bind: %s", foundName, err),
+					fmt.Sprintf(i18n.T("Reused existing group **%s** but failed to record the bind: %s"), foundName, err),
 					ctx.MessageID)
 			}
 			if err := ctx.Workspaces.SetCwd(foundID, cwd); err != nil {
@@ -108,9 +110,9 @@ func handleOpen(args string, ctx *Context) error {
 			}
 			inheritProviderModel(ctx, foundID)
 			_ = ctx.Sender.SendMarkdown(foundID,
-				fmt.Sprintf("Welcome back. This group is bound to `%s`.", cwd), "")
+				fmt.Sprintf(i18n.T("Welcome back. This group is bound to `%s`."), cwd), "")
 			return ctx.Sender.SendMarkdown(ctx.ChatID,
-				fmt.Sprintf("Reused existing group **%s** for `%s`.", foundName, cwd),
+				fmt.Sprintf(i18n.T("Reused existing group **%s** for `%s`."), foundName, cwd),
 				ctx.MessageID)
 		}
 	}
@@ -121,7 +123,7 @@ func handleOpen(args string, ctx *Context) error {
 	if newChatID == "" {
 		// Hard failure: the group itself was not created.
 		return ctx.Sender.SendMarkdown(ctx.ChatID,
-			fmt.Sprintf("Failed to create group: %s. Check the bot has `im:chat:create` permission.", createErr),
+			fmt.Sprintf(i18n.T("Failed to create group: %s. Check the bot has `im:chat:create` permission."), createErr),
 			ctx.MessageID)
 	}
 	if err := ctx.ChatBinds.Set(newChatID, chatbind.Bind{
@@ -134,7 +136,7 @@ func handleOpen(args string, ctx *Context) error {
 		// The user can still use the group; reuse will not work until the
 		// bind is recorded.
 		_ = ctx.Sender.SendMarkdown(ctx.ChatID,
-			fmt.Sprintf("Created group **%s** but failed to record the bind: %s", name, err),
+			fmt.Sprintf(i18n.T("Created group **%s** but failed to record the bind: %s"), name, err),
 			ctx.MessageID)
 	}
 	if err := ctx.Workspaces.SetCwd(newChatID, cwd); err != nil {
@@ -142,17 +144,17 @@ func handleOpen(args string, ctx *Context) error {
 	}
 	inheritProviderModel(ctx, newChatID)
 	_ = ctx.Sender.SendMarkdown(newChatID,
-		fmt.Sprintf("This group is bound to `%s`. Send any message (and `@bot` in groups) to start a run.", cwd), "")
+		fmt.Sprintf(i18n.T("This group is bound to `%s`. Send any message (and `@bot` in groups) to start a run."), cwd), "")
 	if createErr != nil {
 		// Partial success: the group was created but the member could not be
 		// added (e.g. missing im:chat:member:bot.add_one scope). Warn the
 		// user so they can join the group manually via the group link.
 		return ctx.Sender.SendMarkdown(ctx.ChatID,
-			fmt.Sprintf("Created group **%s** for `%s`, but could not add you automatically: %s. Please join the group manually.", name, cwd, createErr),
+			fmt.Sprintf(i18n.T("Created group **%s** for `%s`, but could not add you automatically: %s. Please join the group manually."), name, cwd, createErr),
 			ctx.MessageID)
 	}
 	return ctx.Sender.SendMarkdown(ctx.ChatID,
-		fmt.Sprintf("Created group **%s** for `%s`.", name, cwd),
+		fmt.Sprintf(i18n.T("Created group **%s** for `%s`."), name, cwd),
 		ctx.MessageID)
 }
 
@@ -165,13 +167,13 @@ func resolveOpenCwd(args string, ctx *Context) (string, error) {
 		base := ctx.Workspaces.CwdFor(ctx.Scope, ctx.Config.Workspace.Default)
 		cwd, err := workspace.ResolveFrom(input, base)
 		if err != nil {
-			return "", fmt.Errorf("Invalid path: %s", err)
+			return "", fmt.Errorf(i18n.T("Invalid path: %s"), err)
 		}
 		return cwd, nil
 	}
 	cwd := ctx.Workspaces.CwdFor(ctx.Scope, ctx.Config.Workspace.Default)
 	if cwd == "" {
-		return "", fmt.Errorf("No working directory set. Use `/cd <path>` first, or pass a path to `/open <path>`.")
+		return "", errors.New(i18n.T("No working directory set. Use `/cd <path>` first, or pass a path to `/open <path>`."))
 	}
 	return cwd, nil
 }

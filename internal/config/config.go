@@ -25,6 +25,9 @@ type Config struct {
 	Copilot            *Copilot  `json:"copilot,omitempty"`
 	NewIssue           *NewIssue `json:"newIssue,omitempty"`
 	DefaultProvider    string    `json:"defaultProvider,omitempty"`
+	// Language selects the bot's output language ("en" or "zh", default
+	// "en"). The LARK_ACP_BRIDGE_LANG environment variable overrides it.
+	Language           string    `json:"language,omitempty"`
 	MaxConcurrentRuns  int       `json:"maxConcurrentRuns"`
 	DebounceMs         int       `json:"debounceMs"`
 	StopGraceMs        int       `json:"stopGraceMs"`
@@ -168,6 +171,9 @@ func defaults(c *Config) {
 	if c.App.Tenant == "" {
 		c.App.Tenant = "feishu"
 	}
+	if c.Language == "" {
+		c.Language = "en"
+	}
 }
 
 // Validate checks required fields after defaults are applied.
@@ -180,6 +186,9 @@ func (c *Config) Validate() error {
 	}
 	if c.App.Tenant != "feishu" && c.App.Tenant != "lark" {
 		return fmt.Errorf("app.tenant must be feishu or lark, got %q", c.App.Tenant)
+	}
+	if c.Language != "en" && c.Language != "zh" {
+		return fmt.Errorf("language must be en or zh, got %q", c.Language)
 	}
 	if c.Copilot != nil {
 		switch c.Copilot.Permissions {
@@ -235,6 +244,9 @@ func Load() (*Config, error) {
 	var c Config
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", p, err)
+	}
+	if l := os.Getenv("LARK_ACP_BRIDGE_LANG"); l != "" {
+		c.Language = l
 	}
 	defaults(&c)
 	if err := c.Validate(); err != nil {

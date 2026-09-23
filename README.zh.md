@@ -171,6 +171,7 @@ go run ./cmd/lark-acp-bridge run
     "defaultModel": ""
   },
   "defaultProvider": "devin",
+  "language": "en",
   "codex": {
     "binary": "codex",
     "sandbox": "danger-full-access",
@@ -193,6 +194,11 @@ go run ./cmd/lark-acp-bridge run
 Lark（国际版）应用将 `tenant` 设为 `"lark"`。`defaultProvider` 默认为 `devin`；
 设为 `codex` 或 `copilot` 可将其设为默认。`codex` 和 `copilot` 块是可选的——
 省略即完全禁用这些 provider。
+
+`language` 选择机器人输出语言：`"en"`（默认）或 `"zh"`。设为 `"zh"` 时，
+斜杠命令回复和卡片文本为中文，`/help` 会列出中文命令别名（如 `/新建` 对应
+`/new`、`/帮助` 对应 `/help`）。两种语言下别名均可用；命令名本身保持英文。
+环境变量 `LARK_ACP_BRIDGE_LANG` 可覆盖配置值。修改语言后需重启。
 
 可选的 `newIssue` 块用于调节 `/new-issue` 命令：
 

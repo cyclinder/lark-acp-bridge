@@ -189,6 +189,7 @@ Create `~/.lark-acp-bridge/config.json`:
     "defaultModel": ""
   },
   "defaultProvider": "devin",
+  "language": "en",
   "codex": {
     "binary": "codex",
     "sandbox": "danger-full-access",
@@ -212,6 +213,13 @@ Set `tenant` to `"lark"` for Lark (global) apps. `defaultProvider` defaults
 to `devin`; set it to `codex` or `copilot` to make one of them the default.
 The `codex` and `copilot` blocks are optional — omit them to disable those
 providers entirely.
+
+`language` selects the bot's output language: `"en"` (default) or `"zh"`.
+With `"zh"`, slash-command replies and card text are in Chinese, and `/help`
+lists the Chinese command aliases (e.g. `/新建` for `/new`, `/帮助` for
+`/help`). The aliases are accepted in both languages; command names
+themselves stay English. The `LARK_ACP_BRIDGE_LANG` environment variable
+overrides the config value. Changing the language requires a restart.
 
 An optional `newIssue` block tunes the `/new-issue` command:
 

@@ -39,6 +39,7 @@ import (
 	"github.com/cognition/lark-acp-bridge/internal/commands"
 	"github.com/cognition/lark-acp-bridge/internal/config"
 	"github.com/cognition/lark-acp-bridge/internal/daemon"
+	"github.com/cognition/lark-acp-bridge/internal/i18n"
 	"github.com/cognition/lark-acp-bridge/internal/intake"
 	"github.com/cognition/lark-acp-bridge/internal/lark"
 	bridgetlog "github.com/cognition/lark-acp-bridge/internal/log"
@@ -217,6 +218,10 @@ func runForeground(configPath string, managed bool) {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Create ~/.lark-acp-bridge/config.json first. Example:\n")
 		fmt.Fprintf(os.Stderr, `{"app":{"id":"cli_xxx","secret":"xxx","tenant":"feishu"},"agent":{"binary":"devin","permissionMode":"dangerous"}}`+"\n")
+		os.Exit(1)
+	}
+	if err := i18n.SetLocale(cfg.Language); err != nil {
+		fmt.Fprintf(os.Stderr, "config language: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -526,9 +531,9 @@ func (a *appCtx) handleMessage(msg *larktypes.NormalizedMessage, batcher *intake
 			cmd = fields[0]
 		}
 		if !readOnlyCommands[cmd] {
-			reply := "Only the bridge owner can use this. Available to you: `/help`, `/status`, `/pwd`."
+			reply := i18n.T("Only the bridge owner can use this. Available to you: `/help`, `/status`, `/pwd`.")
 			if owner == "" {
-				reply = "Cannot verify the bridge owner right now; only `/help`, `/status`, `/pwd` are available."
+				reply = i18n.T("Cannot verify the bridge owner right now; only `/help`, `/status`, `/pwd` are available.")
 			}
 			return a.ch.SendMarkdown(chatID, reply, msg.MessageID)
 		}
@@ -566,7 +571,7 @@ func (a *appCtx) handleMessage(msg *larktypes.NormalizedMessage, batcher *intake
 	handled, err := commands.TryDispatch(content, cmdCtx)
 	if err != nil {
 		bridgetlog.Error("main", "command", err.Error())
-		_ = a.ch.SendMarkdown(chatID, fmt.Sprintf("Command error: %s", err), msg.MessageID)
+		_ = a.ch.SendMarkdown(chatID, fmt.Sprintf(i18n.T("Command error: %s"), err), msg.MessageID)
 		return nil
 	}
 	if handled {
@@ -582,7 +587,7 @@ func (a *appCtx) handleMessage(msg *larktypes.NormalizedMessage, batcher *intake
 	// Verify a working directory is set before accepting messages.
 	cwd := a.workspaces.CwdFor(scope, a.cfg.Workspace.Default)
 	if cwd == "" {
-		_ = a.ch.SendMarkdown(chatID, "No working directory set. Use `/cd <path>` first.", msg.MessageID)
+		_ = a.ch.SendMarkdown(chatID, i18n.T("No working directory set. Use `/cd <path>` first."), msg.MessageID)
 		return nil
 	}
 
@@ -599,7 +604,7 @@ func (a *appCtx) handleMessage(msg *larktypes.NormalizedMessage, batcher *intake
 func (a *appCtx) startRun(scope, prompt string) {
 	cwd := a.workspaces.CwdFor(scope, a.cfg.Workspace.Default)
 	if cwd == "" {
-		_ = a.ch.SendMarkdown(scope, "No working directory set. Use `/cd <path>` first.", "")
+		_ = a.ch.SendMarkdown(scope, i18n.T("No working directory set. Use `/cd <path>` first."), "")
 		return
 	}
 	a.startRunIn(scope, prompt, cwd)
@@ -612,7 +617,7 @@ func (a *appCtx) startRunIn(scope, prompt, cwd string) {
 	chatID := scope // v1: scope == chatID
 	adapter := a.registry.Resolve(scope)
 	if adapter == nil {
-		_ = a.ch.SendMarkdown(chatID, "No provider available for this chat. Use `/provider` to pick one.", "")
+		_ = a.ch.SendMarkdown(chatID, i18n.T("No provider available for this chat. Use `/provider` to pick one."), "")
 		return
 	}
 	entry, _ := a.sessions.Get(scope)
@@ -649,7 +654,7 @@ func (a *appCtx) startRunIn(scope, prompt, cwd string) {
 		})
 		if err != nil {
 			bridgetlog.Error("main", "run", err.Error())
-			_ = a.ch.SendMarkdown(chatID, fmt.Sprintf("Run failed: %s", err), "")
+			_ = a.ch.SendMarkdown(chatID, fmt.Sprintf(i18n.T("Run failed: %s"), err), "")
 			return
 		}
 	}()

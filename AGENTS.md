@@ -15,7 +15,9 @@ the user and the agent. Specifically, it covers:
 - Pull request titles and bodies
 - Documentation files (`README.md`, `DESIGN.md`, etc.)
 - User-facing strings emitted by the bot (slash-command replies, card text,
-  log messages, error messages)
+  log messages, error messages) — in their canonical form. English literals
+  are the message keys and defaults; localized output is provided only
+  through the `internal/i18n` package (see the exception below).
 - This `AGENTS.md` file and any future agent-instruction files
 
 Do NOT mix Chinese (or any other non-English language) into code, docs,
@@ -31,6 +33,13 @@ Exceptions are limited to:
 - Quoting external source material verbatim (clearly marked as a quote).
 - Proper nouns, product names, or API field names that are themselves
   non-English by definition.
+- Localization data in the `internal/i18n` package: translation tables
+  (e.g. `zh.go`) and the Chinese slash-command aliases in
+  `internal/commands`. Every localized string must have an English
+  canonical key; the bot's default output language remains English
+  (config `language: en`).
+- The `/new-issue` prompt template and `README.zh.md`, which are
+  Chinese-facing product surfaces by design.
 
 ## Project intent
 

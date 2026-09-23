@@ -16,6 +16,7 @@ import (
 	"github.com/cognition/lark-acp-bridge/internal/card"
 	"github.com/cognition/lark-acp-bridge/internal/chatbind"
 	"github.com/cognition/lark-acp-bridge/internal/config"
+	"github.com/cognition/lark-acp-bridge/internal/i18n"
 	"github.com/cognition/lark-acp-bridge/internal/provider"
 	"github.com/cognition/lark-acp-bridge/internal/run"
 	"github.com/cognition/lark-acp-bridge/internal/session"
@@ -171,6 +172,26 @@ var handlers = map[string]Handler{
 	"/new-issue": handleNewIssue,
 }
 
+// zhAliases maps Chinese command aliases to their canonical English
+// commands. Aliases are always accepted regardless of the output locale so
+// users can mix languages; /help lists them when the locale is zh.
+var zhAliases = map[string]string{
+	"/新建":   "/new",
+	"/重置":   "/reset",
+	"/目录":   "/cd",
+	"/工作区":  "/ws",
+	"/开群":   "/open",
+	"/状态":   "/status",
+	"/当前目录": "/pwd",
+	"/停止":   "/stop",
+	"/帮助":   "/help",
+	"/模型":   "/model",
+	"/恢复":   "/resume",
+	"/会话":   "/sessions",
+	"/提供方":  "/provider",
+	"/新建议题": "/new-issue",
+}
+
 // TryDispatch checks if a message is a slash command and dispatches it.
 // Returns (handled, error). A non-slash message returns (false, nil).
 func TryDispatch(text string, ctx *Context) (bool, error) {
@@ -181,6 +202,9 @@ func TryDispatch(text string, ctx *Context) (bool, error) {
 	parts := strings.Fields(trimmed)
 	cmd := parts[0]
 	args := strings.TrimSpace(strings.TrimPrefix(trimmed, cmd))
+	if canonical, ok := zhAliases[cmd]; ok {
+		cmd = canonical
+	}
 	h, ok := handlers[cmd]
 	if !ok {
 		return false, nil
@@ -194,18 +218,18 @@ func handleNew(_ string, ctx *Context) error {
 		c.Close(ctx.Scope)
 	}
 	_ = ctx.Sessions.Clear(ctx.Scope)
-	return ctx.Sender.SendMarkdown(ctx.ChatID, "Session cleared.", ctx.MessageID)
+	return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("Session cleared."), ctx.MessageID)
 }
 
 func handleCd(args string, ctx *Context) error {
 	input := strings.TrimSpace(args)
 	if input == "" {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "Usage: `/cd <path>` — absolute, `~/sub`, or relative to the current cwd", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("Usage: `/cd <path>` — absolute, `~/sub`, or relative to the current cwd"), ctx.MessageID)
 	}
 	base := ctx.Workspaces.CwdFor(ctx.Scope, ctx.Config.Workspace.Default)
 	cwd, err := workspace.ResolveFrom(input, base)
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Invalid path: %s", err), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Invalid path: %s"), err), ctx.MessageID)
 	}
 	ctx.Active.Interrupt(ctx.Scope)
 	if c, ok := ctx.Adapter.(SessionCloser); ok {
@@ -217,7 +241,7 @@ func handleCd(args string, ctx *Context) error {
 	if err := ctx.Sessions.Clear(ctx.Scope); err != nil {
 		return err
 	}
-	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Switched cwd to `%s` (session reset).", cwd), ctx.MessageID)
+	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Switched cwd to `%s` (session reset)."), cwd), ctx.MessageID)
 }
 
 func handleStatus(_ string, ctx *Context) error {
@@ -242,25 +266,25 @@ func handleStatus(_ string, ctx *Context) error {
 func handlePwd(_ string, ctx *Context) error {
 	cwd := ctx.Workspaces.CwdFor(ctx.Scope, ctx.Config.Workspace.Default)
 	if cwd == "" {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "No working directory set. Use `/cd <path>` first.", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("No working directory set. Use `/cd <path>` first."), ctx.MessageID)
 	}
-	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Current directory: `%s`", cwd), ctx.MessageID)
+	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Current directory: `%s`"), cwd), ctx.MessageID)
 }
 
 func handleStop(_ string, ctx *Context) error {
 	h := ctx.Active.Get(ctx.Scope)
 	if h == nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "No active run to stop.", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("No active run to stop."), ctx.MessageID)
 	}
 	ctx.Active.Interrupt(ctx.Scope)
-	return ctx.Sender.SendMarkdown(ctx.ChatID, "Stopped the active run.", ctx.MessageID)
+	return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("Stopped the active run."), ctx.MessageID)
 }
 
 func handleHelp(_ string, ctx *Context) error {
 	agentCommands := []string{
-		"`/model` — list available models (current marked); `/model N|name` switches",
-		"`/resume` — list saved sessions; `/resume N` to reconnect one",
-		"`/sessions` — list provider sessions; `/sessions N` to continue one",
+		i18n.T("`/model` — list available models (current marked); `/model N|name` switches"),
+		i18n.T("`/resume` — list saved sessions; `/resume N` to reconnect one"),
+		i18n.T("`/sessions` — list provider sessions; `/sessions N` to continue one"),
 	}
 	c := card.HelpCard(ctx.Adapter.DisplayName(), agentCommands)
 	return sendCard(ctx, c)
@@ -328,20 +352,20 @@ func handleModel(args string, ctx *Context) error {
 		}
 	}
 	if chosen == "" {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Unknown model: %s. Use `/model` to list.", input), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Unknown model: %s. Use `/model` to list."), input), ctx.MessageID)
 	}
 	// Try to switch the model on the active session without resetting
 	// context. If no session is active, stash the choice for the next spawn.
 	if sw, ok := ctx.Adapter.(ModelSwitcher); ok {
 		applied, err := sw.SetModel(context.Background(), ctx.Scope, chosen)
 		if err != nil {
-			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Model switch failed: %s", err), ctx.MessageID)
+			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Model switch failed: %s"), err), ctx.MessageID)
 		}
 		if applied {
 			if err := ctx.Sessions.SetModel(ctx.Scope, chosen); err != nil {
 				return err
 			}
-			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Switched model to `%s` (session preserved).", chosen), ctx.MessageID)
+			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Switched model to `%s` (session preserved)."), chosen), ctx.MessageID)
 		}
 	}
 	// No active session: stash the choice for the next spawn and clear the
@@ -351,7 +375,7 @@ func handleModel(args string, ctx *Context) error {
 	if err := ctx.Sessions.Set(ctx.Scope, session.Entry{Model: chosen}); err != nil {
 		return err
 	}
-	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Switched model to `%s` (session cleared; will apply on next run).", chosen), ctx.MessageID)
+	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Switched model to `%s` (session cleared; will apply on next run)."), chosen), ctx.MessageID)
 }
 
 func sendCard(ctx *Context, c card.Card) error {
@@ -388,11 +412,11 @@ func listSessions(ctx *Context) error {
 func resumeByIndex(ctx *Context, input string) error {
 	n, err := strconv.Atoi(input)
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "Usage: `/resume` to list, or `/resume N` to pick a session.", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("Usage: `/resume` to list, or `/resume N` to pick a session."), ctx.MessageID)
 	}
 	items := ctx.Sessions.List()
 	if n < 1 || n > len(items) {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Invalid session number %d. Use `/resume` to list (1-%d).", n, len(items)), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Invalid session number %d. Use `/resume` to list (1-%d)."), n, len(items)), ctx.MessageID)
 	}
 	picked := items[n-1]
 	// Stop any active run before switching sessions.
@@ -420,7 +444,7 @@ func resumeByIndex(ctx *Context, input string) error {
 		sid = sid[:12] + "..."
 	}
 	return ctx.Sender.SendMarkdown(ctx.ChatID,
-		fmt.Sprintf("Resumed session `%s` (from scope `%s`). Next message will continue that context.", sid, picked.Scope),
+		fmt.Sprintf(i18n.T("Resumed session `%s` (from scope `%s`). Next message will continue that context."), sid, picked.Scope),
 		ctx.MessageID)
 }
 
@@ -441,7 +465,7 @@ func handleSessions(args string, ctx *Context) error {
 func providerSessionList(ctx *Context) ([]agent.SessionInfo, error) {
 	sl, ok := ctx.Adapter.(ProviderSessionLister)
 	if !ok {
-		return nil, fmt.Errorf("provider `%s` does not support listing sessions", providerID(ctx))
+		return nil, fmt.Errorf(i18n.T("provider `%s` does not support listing sessions"), providerID(ctx))
 	}
 	return sl.ListSessions(context.Background())
 }
@@ -449,7 +473,7 @@ func providerSessionList(ctx *Context) ([]agent.SessionInfo, error) {
 func listProviderSessions(ctx *Context) error {
 	sessions, err := providerSessionList(ctx)
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Cannot list sessions: %s", err), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Cannot list sessions: %s"), err), ctx.MessageID)
 	}
 	currentID := ""
 	if entry, ok := ctx.Sessions.Get(ctx.Scope); ok {
@@ -480,18 +504,18 @@ func listProviderSessions(ctx *Context) error {
 func selectProviderSession(ctx *Context, input string) error {
 	n, err := strconv.Atoi(input)
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "Usage: `/sessions` to list, or `/sessions N` to pick a session.", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("Usage: `/sessions` to list, or `/sessions N` to pick a session."), ctx.MessageID)
 	}
 	sessions, err := providerSessionList(ctx)
 	if err != nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Cannot list sessions: %s", err), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Cannot list sessions: %s"), err), ctx.MessageID)
 	}
 	if n < 1 || n > len(sessions) {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Invalid session number %d. Use `/sessions` to list (1-%d).", n, len(sessions)), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Invalid session number %d. Use `/sessions` to list (1-%d)."), n, len(sessions)), ctx.MessageID)
 	}
 	picked := sessions[n-1]
 	if picked.Locked {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Session `%s` is open in another client and cannot be continued here.", picked.ID), ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Session `%s` is open in another client and cannot be continued here."), picked.ID), ctx.MessageID)
 	}
 	// Stop any active run and kill the pooled session process so the next
 	// message spawns fresh and loads the picked session.
@@ -518,10 +542,10 @@ func selectProviderSession(ctx *Context, input string) error {
 	}
 	title := picked.Title
 	if title == "" {
-		title = "(untitled)"
+		title = i18n.T("(untitled)")
 	}
 	return ctx.Sender.SendMarkdown(ctx.ChatID,
-		fmt.Sprintf("Switched to session `%s` (%s). Subsequent messages continue that session; cwd is now `%s`.", picked.ID, title, picked.Cwd),
+		fmt.Sprintf(i18n.T("Switched to session `%s` (%s). Subsequent messages continue that session; cwd is now `%s`."), picked.ID, title, picked.Cwd),
 		ctx.MessageID)
 }
 
@@ -531,7 +555,7 @@ func selectProviderSession(ctx *Context, input string) error {
 // it clears the override and reverts to the default provider.
 func handleProvider(args string, ctx *Context) error {
 	if ctx.Providers == nil {
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "Provider switching is not configured.", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("Provider switching is not configured."), ctx.MessageID)
 	}
 	input := strings.TrimSpace(args)
 	if input == "" {
@@ -576,10 +600,10 @@ func switchProvider(ctx *Context, id string, useDefault bool) error {
 			}
 		}
 		if !found {
-			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Unknown provider: `%s`. Use `/provider` to list.", id), ctx.MessageID)
+			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Unknown provider: `%s`. Use `/provider` to list."), id), ctx.MessageID)
 		}
 		if !available {
-			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Provider `%s` is not available (binary missing or not logged in).", id), ctx.MessageID)
+			return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Provider `%s` is not available (binary missing or not logged in)."), id), ctx.MessageID)
 		}
 	}
 	// Stop any active run and close the old adapter's session.
@@ -594,10 +618,10 @@ func switchProvider(ctx *Context, id string, useDefault bool) error {
 		if err := ctx.Providers.Clear(ctx.Scope); err != nil {
 			return err
 		}
-		return ctx.Sender.SendMarkdown(ctx.ChatID, "Reverted to the default provider (session cleared).", ctx.MessageID)
+		return ctx.Sender.SendMarkdown(ctx.ChatID, i18n.T("Reverted to the default provider (session cleared)."), ctx.MessageID)
 	}
 	if err := ctx.Providers.Set(ctx.Scope, id); err != nil {
 		return err
 	}
-	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf("Switched provider to `%s` (session cleared).", id), ctx.MessageID)
+	return ctx.Sender.SendMarkdown(ctx.ChatID, fmt.Sprintf(i18n.T("Switched provider to `%s` (session cleared)."), id), ctx.MessageID)
 }

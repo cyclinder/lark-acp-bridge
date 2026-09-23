@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cognition/lark-acp-bridge/internal/agent"
+	"github.com/cognition/lark-acp-bridge/internal/i18n"
 )
 
 // Card is a minimal Feishu card payload. The lark package marshals it to the
@@ -127,22 +128,22 @@ func shell(title string, elements []Element) Card {
 // agentCommands are shown only when a provider is selected (always in v1).
 func HelpCard(agentName string, agentCommands []string) Card {
 	var b strings.Builder
-	b.WriteString("**Bridge commands** (always available, no token cost):\n")
+	b.WriteString(i18n.T("**Bridge commands** (always available, no token cost):"))
+	b.WriteByte('\n')
 	for _, c := range bridgeHelpCommands {
-		b.WriteString(c)
+		b.WriteString(i18n.T(c))
 		b.WriteByte('\n')
 	}
-	b.WriteString("\n**")
-	b.WriteString(agentName)
-	b.WriteString(" commands** (no token cost):\n")
+	b.WriteByte('\n')
+	b.WriteString(fmt.Sprintf(i18n.T("**%s commands** (no token cost):"), agentName))
+	b.WriteByte('\n')
 	for _, c := range agentCommands {
 		b.WriteString(c)
 		b.WriteByte('\n')
 	}
-	b.WriteString("\nAnything else is sent to ")
-	b.WriteString(agentName)
-	b.WriteString(" as a prompt.")
-	return shell("Help", []Element{markdown(b.String())})
+	b.WriteByte('\n')
+	b.WriteString(fmt.Sprintf(i18n.T("Anything else is sent to %s as a prompt."), agentName))
+	return shell(i18n.T("Help"), []Element{markdown(b.String())})
 }
 
 var bridgeHelpCommands = []string{
@@ -176,28 +177,28 @@ type StatusInfo struct {
 func StatusCard(info StatusInfo) Card {
 	sessionLine := info.SessionID
 	if sessionLine == "" {
-		sessionLine = "(none)"
+		sessionLine = i18n.T("(none)")
 	} else if len(sessionLine) > 12 {
 		sessionLine = sessionLine[:12] + "..."
 	}
 	cwdLine := info.Cwd
 	if cwdLine == "" {
-		cwdLine = "(unset)"
+		cwdLine = i18n.T("(unset)")
 	}
 	modelLine := info.Model
 	if modelLine == "" {
-		modelLine = "(agent default)"
+		modelLine = i18n.T("(agent default)")
 	}
 	lines := []string{
-		fmt.Sprintf("**scope**: `%s`", info.Scope),
-		fmt.Sprintf("**profile**: %s", info.Profile),
-		fmt.Sprintf("**cwd**: `%s`", cwdLine),
-		fmt.Sprintf("**session**: `%s`", sessionLine),
-		fmt.Sprintf("**agent**: %s", info.AgentName),
-		fmt.Sprintf("**model**: %s", modelLine),
-		fmt.Sprintf("**active run**: %s", boolStr(info.ActiveRun, "yes", "no")),
+		fmt.Sprintf(i18n.T("**scope**: `%s`"), info.Scope),
+		fmt.Sprintf(i18n.T("**profile**: %s"), info.Profile),
+		fmt.Sprintf(i18n.T("**cwd**: `%s`"), cwdLine),
+		fmt.Sprintf(i18n.T("**session**: `%s`"), sessionLine),
+		fmt.Sprintf(i18n.T("**agent**: %s"), info.AgentName),
+		fmt.Sprintf(i18n.T("**model**: %s"), modelLine),
+		fmt.Sprintf(i18n.T("**active run**: %s"), boolStr(info.ActiveRun, i18n.T("yes"), i18n.T("no"))),
 	}
-	return shell("Status", []Element{markdown(strings.Join(lines, "\n"))})
+	return shell(i18n.T("Status"), []Element{markdown(strings.Join(lines, "\n"))})
 }
 
 // --- models card ----------------------------------------------------------
@@ -208,23 +209,23 @@ func StatusCard(info StatusInfo) Card {
 func ModelsCard(models []ModelEntry, current string) Card {
 	var b strings.Builder
 	if len(models) == 0 {
-		b.WriteString("No models available. Start a session first, or the agent did not advertise a model list.")
+		b.WriteString(i18n.T("No models available. Start a session first, or the agent did not advertise a model list."))
 	} else {
 		if current != "" {
-			b.WriteString(fmt.Sprintf("**Current model:** `%s`\n\n", current))
+			b.WriteString(fmt.Sprintf(i18n.T("**Current model:** `%s`\n\n"), current))
 		} else {
-			b.WriteString("**Current model:** _none (provider default will apply)_\n\n")
+			b.WriteString(i18n.T("**Current model:** _none (provider default will apply)_\n\n"))
 		}
-		b.WriteString("**Available models** (use `/model N` or `/model name` to switch):\n\n")
+		b.WriteString(i18n.T("**Available models** (use `/model N` or `/model name` to switch):\n\n"))
 		for i, m := range models {
 			marker := ""
 			if m.Value == current {
-				marker = "  <- current"
+				marker = i18n.T("  <- current")
 			}
 			b.WriteString(fmt.Sprintf("**%d.** `%s` — %s%s\n", i+1, m.Value, m.Name, marker))
 		}
 	}
-	return shell("Model", []Element{markdown(b.String())})
+	return shell(i18n.T("Model"), []Element{markdown(b.String())})
 }
 
 // ModelEntry is one row in the models card.
@@ -295,24 +296,24 @@ type WorkspaceEntry struct {
 func WorkspacesCard(current string, entries []WorkspaceEntry) Card {
 	var b strings.Builder
 	if current == "" {
-		b.WriteString("**Current directory:** _none_\n\n")
+		b.WriteString(i18n.T("**Current directory:** _none_\n\n"))
 	} else {
-		b.WriteString(fmt.Sprintf("**Current directory:** `%s`\n\n", current))
+		b.WriteString(fmt.Sprintf(i18n.T("**Current directory:** `%s`\n\n"), current))
 	}
 	if len(entries) == 0 {
-		b.WriteString("No saved workspace aliases.\n")
-		b.WriteString("Use `/ws save <name>` to save the current cwd as a named alias.")
+		b.WriteString(i18n.T("No saved workspace aliases.\n"))
+		b.WriteString(i18n.T("Use `/ws save <name>` to save the current cwd as a named alias."))
 	} else {
-		b.WriteString("**Saved aliases** (use `/ws use <name>` to switch, `/ws remove <name>` to delete):\n\n")
+		b.WriteString(i18n.T("**Saved aliases** (use `/ws use <name>` to switch, `/ws remove <name>` to delete):\n\n"))
 		for i, e := range entries {
 			marker := ""
 			if e.Current {
-				marker = "  <- current"
+				marker = i18n.T("  <- current")
 			}
 			b.WriteString(fmt.Sprintf("**%d.** **%s** -> `%s`%s\n", i+1, e.Name, e.Cwd, marker))
 		}
 	}
-	return shell("Workspaces", []Element{markdown(b.String())})
+	return shell(i18n.T("Workspaces"), []Element{markdown(b.String())})
 }
 
 // --- provider card --------------------------------------------------------
@@ -331,22 +332,22 @@ type ProviderRow struct {
 // `/provider <id>` or `/provider default` will do.
 func ProvidersCard(rows []ProviderRow) Card {
 	var b strings.Builder
-	b.WriteString("**Providers** (use `/provider <id>` to switch, `/provider default` to reset):\n\n")
+	b.WriteString(i18n.T("**Providers** (use `/provider <id>` to switch, `/provider default` to reset):\n\n"))
 	for _, r := range rows {
 		marker := ""
 		switch {
 		case r.Current:
-			marker = "  <- current"
+			marker = i18n.T("  <- current")
 		case r.Default:
-			marker = "  <- default"
+			marker = i18n.T("  <- default")
 		}
 		state := ""
 		if !r.Available {
-			state = " (unavailable)"
+			state = i18n.T(" (unavailable)")
 		}
 		b.WriteString(fmt.Sprintf("- `%s` — %s%s%s\n", r.ID, r.DisplayName, state, marker))
 	}
-	return shell("Providers", []Element{markdown(b.String())})
+	return shell(i18n.T("Providers"), []Element{markdown(b.String())})
 }
 
 // --- resume card ----------------------------------------------------------
@@ -364,13 +365,13 @@ type ResumeRow struct {
 func ResumeCard(rows []ResumeRow, currentScope string) Card {
 	var b strings.Builder
 	if len(rows) == 0 {
-		b.WriteString("No saved sessions. Start a run first, then use `/resume` to reconnect.")
+		b.WriteString(i18n.T("No saved sessions. Start a run first, then use `/resume` to reconnect."))
 	} else {
-		b.WriteString("**Saved sessions** (use `/resume N` to reconnect):\n\n")
+		b.WriteString(i18n.T("**Saved sessions** (use `/resume N` to reconnect):\n\n"))
 		for _, r := range rows {
 			marker := ""
 			if r.Scope == currentScope {
-				marker = "  <- current chat"
+				marker = i18n.T("  <- current chat")
 			}
 			sid := r.SessionID
 			if len(sid) > 12 {
@@ -378,17 +379,17 @@ func ResumeCard(rows []ResumeRow, currentScope string) Card {
 			}
 			cwd := r.Cwd
 			if cwd == "" {
-				cwd = "(unset)"
+				cwd = i18n.T("(unset)")
 			}
 			model := r.Model
 			if model == "" {
-				model = "(default)"
+				model = i18n.T("(default)")
 			}
 			b.WriteString(fmt.Sprintf("**%d.** `%s` | session `%s` | cwd `%s` | model %s%s\n",
 				r.Index, r.Scope, sid, cwd, model, marker))
 		}
 	}
-	return shell("Resume", []Element{markdown(b.String())})
+	return shell(i18n.T("Resume"), []Element{markdown(b.String())})
 }
 
 // --- provider sessions card ------------------------------------------------
@@ -419,38 +420,38 @@ const MaxSessionRows = 20
 func SessionsCard(rows []SessionRow, total int) Card {
 	var b strings.Builder
 	if len(rows) == 0 {
-		b.WriteString("The provider reported no sessions.")
+		b.WriteString(i18n.T("The provider reported no sessions."))
 	} else {
-		b.WriteString("**Provider sessions** (use `/sessions N` to continue one):\n\n")
+		b.WriteString(i18n.T("**Provider sessions** (use `/sessions N` to continue one):\n\n"))
 		for _, r := range rows {
 			marker := ""
 			if r.Current {
-				marker = "  <- current chat"
+				marker = i18n.T("  <- current chat")
 			}
 			state := ""
 			if r.Locked {
-				state = " (in use elsewhere)"
+				state = i18n.T(" (in use elsewhere)")
 			}
 			title := r.Title
 			if title == "" {
-				title = "(untitled)"
+				title = i18n.T("(untitled)")
 			}
-			updated := "unknown time"
+			updated := i18n.T("unknown time")
 			if !r.UpdatedAt.IsZero() {
 				updated = r.UpdatedAt.Local().Format("2006-01-02 15:04")
 			}
 			cwd := r.Cwd
 			if cwd == "" {
-				cwd = "(unset)"
+				cwd = i18n.T("(unset)")
 			}
 			b.WriteString(fmt.Sprintf("**%d.** **%s** | `%s` | cwd `%s` | %s%s%s\n",
 				r.Index, title, r.SessionID, cwd, updated, state, marker))
 		}
 		if total > len(rows) {
-			b.WriteString(fmt.Sprintf("\n_Showing the %d most recent of %d sessions._\n", len(rows), total))
+			b.WriteString(fmt.Sprintf(i18n.T("\n_Showing the %d most recent of %d sessions._\n"), len(rows), total))
 		}
 	}
-	return shell("Sessions", []Element{markdown(b.String())})
+	return shell(i18n.T("Sessions"), []Element{markdown(b.String())})
 }
 
 // --- run card (streaming) ------------------------------------------------
@@ -552,7 +553,7 @@ func NewRunState() *RunState {
 		phase:          phaseThinking,
 		startedAt:      now,
 		lastActivityAt: now,
-		lastActivity:   "thinking",
+		lastActivity:   i18n.T("thinking"),
 	}
 }
 
@@ -574,7 +575,7 @@ func (s *RunState) Reduce(ev agent.Event) {
 			s.blocks = append(s.blocks, b)
 		}
 		s.phase = phaseWriting
-		s.lastActivity = "writing"
+		s.lastActivity = i18n.T("writing")
 	case agent.EventThinking:
 		// Two reasoning styles share this event:
 		//   - Snapshot (Devin ACP plan): ev.Delta is the FULL plan on
@@ -601,7 +602,7 @@ func (s *RunState) Reduce(ev agent.Event) {
 			s.planText = trimTailString(s.planText, maxPlanRunes, &s.planDropped)
 		}
 		s.phase = phasePlanning
-		s.lastActivity = "planning"
+		s.lastActivity = i18n.T("planning")
 	case agent.EventToolUse:
 		s.blocks = append(s.blocks, block{
 			kind: "tool",
@@ -614,7 +615,7 @@ func (s *RunState) Reduce(ev agent.Event) {
 			},
 		})
 		s.phase = phaseToolRunning
-		s.lastActivity = "tool: " + ev.ToolName
+		s.lastActivity = i18n.T("tool: ") + ev.ToolName
 	case agent.EventToolResult:
 		for i := range s.blocks {
 			if s.blocks[i].kind == "tool" && s.blocks[i].tool.id == ev.ToolID {
@@ -627,10 +628,10 @@ func (s *RunState) Reduce(ev agent.Event) {
 		}
 		// The agent now processes the result before the next step.
 		s.phase = phaseThinking
-		s.lastActivity = "tool done"
+		s.lastActivity = i18n.T("tool done")
 	case agent.EventUsage:
 		s.usage = &usageEntry{inputTokens: ev.InputTokens, outputTokens: ev.OutputTokens, costUSD: ev.CostUSD}
-		s.lastActivity = "usage"
+		s.lastActivity = i18n.T("usage")
 	case agent.EventDone:
 		s.sessionID = ev.SessionID
 		s.stopReason = ev.StopReason
@@ -731,11 +732,11 @@ func (s *RunState) Render() Card {
 	if s.planText != "" {
 		prefix := ""
 		if s.planDropped {
-			prefix = "_(... earlier plan omitted)_\n\n"
+			prefix = i18n.T("_(... earlier plan omitted)_\n\n")
 		}
 		expanded := s.phase == phasePlanning
 		elements = append(elements, collapsiblePanel(
-			"🧠 Thinking",
+			i18n.T("🧠 Thinking"),
 			prefix+s.planText,
 			expanded,
 			"grey",
@@ -772,7 +773,7 @@ func (s *RunState) Render() Card {
 					if len(elements) > 0 {
 						elements = append(elements, hr)
 					}
-					elements = append(elements, md(fmt.Sprintf("_+ %d earlier tool calls_", toolsHidden)))
+					elements = append(elements, md(fmt.Sprintf(i18n.T("_+ %d earlier tool calls_"), toolsHidden)))
 				}
 				continue
 			}
@@ -806,13 +807,13 @@ func (s *RunState) Render() Card {
 	elements = append(elements, hr)
 	var footer strings.Builder
 	if s.usage != nil {
-		footer.WriteString(fmt.Sprintf("tokens: %d | cost: $%.4f", s.usage.inputTokens, s.usage.costUSD))
+		footer.WriteString(fmt.Sprintf(i18n.T("tokens: %d | cost: $%.4f"), s.usage.inputTokens, s.usage.costUSD))
 		footer.WriteString(" | ")
 	}
 	// While running, prepend a heartbeat so the user can tell the agent
 	// is alive even when it emits no ACP updates for a while.
 	if s.status == statusRunning {
-		footer.WriteString(fmt.Sprintf("running %s · last: %s (%s ago) | ",
+		footer.WriteString(fmt.Sprintf(i18n.T("running %s · last: %s (%s ago) | "),
 			durationLabel(time.Since(s.startedAt)),
 			s.lastActivity,
 			durationLabel(time.Since(s.lastActivityAt))))
@@ -832,29 +833,29 @@ func (s *RunState) Render() Card {
 func (s *RunState) headerTitle() string {
 	switch s.status {
 	case statusDone:
-		return "✅ Done"
+		return i18n.T("✅ Done")
 	case statusError:
-		title := "❌ Error"
+		title := i18n.T("❌ Error")
 		if s.errMsg != "" {
 			title += ": " + truncate(s.errMsg, 60)
 		}
 		return title
 	case statusCancelled:
-		return "⏹️ Cancelled"
+		return i18n.T("⏹️ Cancelled")
 	}
 	// Running: reflect the current phase.
 	switch s.phase {
 	case phaseWriting:
-		return "✍️ Writing response..."
+		return i18n.T("✍️ Writing response...")
 	case phasePlanning:
-		return "🧠 Planning..."
+		return i18n.T("🧠 Planning...")
 	case phaseToolRunning:
 		if name := s.runningToolName(); name != "" {
-			return "🛠️ Running tool: " + name
+			return i18n.T("🛠️ Running tool: ") + name
 		}
-		return "🛠️ Running tool..."
+		return i18n.T("🛠️ Running tool...")
 	default:
-		return "🧠 Thinking..."
+		return i18n.T("🧠 Thinking...")
 	}
 }
 
@@ -898,15 +899,15 @@ func toolIcon(status string) string {
 func statusLabel(s runStatus) string {
 	switch s {
 	case statusRunning:
-		return "running..."
+		return i18n.T("running...")
 	case statusDone:
-		return "✅ done"
+		return i18n.T("✅ done")
 	case statusError:
-		return "❌ error"
+		return i18n.T("❌ error")
 	case statusCancelled:
-		return "⏹️ cancelled"
+		return i18n.T("⏹️ cancelled")
 	}
-	return "unknown"
+	return i18n.T("unknown")
 }
 
 // Caps for the per-tool body region. Even with the header summary, a single
@@ -934,22 +935,22 @@ func renderToolBody(t toolEntry) string {
 	}
 	switch {
 	case t.output != "":
-		label := "Output"
+		label := i18n.T("Output")
 		if t.status == "failed" {
-			label = "Error"
+			label = i18n.T("Error")
 		}
 		parts = append(parts, fmt.Sprintf("**%s**\n```\n%s\n```", label, truncate(t.output, outputMax)))
 	case t.status == "running":
-		parts = append(parts, "_running..._")
+		parts = append(parts, i18n.T("_running..._"))
 	}
 	if len(parts) == 0 {
-		return "_no output_"
+		return i18n.T("_no output_")
 	}
 	body := strings.Join(parts, "\n\n")
 	if len(body) <= bodyTotalMax {
 		return body
 	}
-	return truncate(body, bodyTotalMax) + "\n\n_(body truncated, see /doctor or logs)_"
+	return truncate(body, bodyTotalMax) + i18n.T("\n\n_(body truncated, see /doctor or logs)_")
 }
 
 // renderToolInput renders a tool's input as a labeled markdown block keyed by
@@ -973,34 +974,34 @@ func renderToolInput(name string, input json.RawMessage) string {
 	switch name {
 	case "command_execution", "Bash", "shell", "Ran command":
 		if cmd := str("command"); cmd != "" {
-			return fmt.Sprintf("**Command**\n```bash\n%s\n```", truncate(cmd, bodyFieldMax))
+			return fmt.Sprintf(i18n.T("**Command**\n```bash\n%s\n```"), truncate(cmd, bodyFieldMax))
 		}
 	case "Read", "Edit", "Write", "NotebookEdit", "Read file":
 		if fp := str("file_path"); fp != "" {
-			return fmt.Sprintf("**File** `%s`", fp)
+			return fmt.Sprintf(i18n.T("**File** `%s`"), fp)
 		}
 	case "Grep", "Search for":
 		var lines []string
 		if pat := str("pattern"); pat != "" {
-			lines = append(lines, fmt.Sprintf("**Pattern** `%s`", pat))
+			lines = append(lines, fmt.Sprintf(i18n.T("**Pattern** `%s`"), pat))
 		}
 		if path := str("path"); path != "" {
-			lines = append(lines, fmt.Sprintf("**Path** `%s`", path))
+			lines = append(lines, fmt.Sprintf(i18n.T("**Path** `%s`"), path))
 		}
 		if len(lines) > 0 {
 			return strings.Join(lines, "\n")
 		}
 	case "Glob", "Find files matching":
 		if pat := str("pattern"); pat != "" {
-			return fmt.Sprintf("**Pattern** `%s`", pat)
+			return fmt.Sprintf(i18n.T("**Pattern** `%s`"), pat)
 		}
 	case "WebFetch":
 		if u := str("url"); u != "" {
-			return fmt.Sprintf("**URL** %s", u)
+			return fmt.Sprintf(i18n.T("**URL** %s"), u)
 		}
 	case "WebSearch":
 		if q := str("query"); q != "" {
-			return fmt.Sprintf("**Query** `%s`", truncate(q, bodyFieldMax))
+			return fmt.Sprintf(i18n.T("**Query** `%s`"), truncate(q, bodyFieldMax))
 		}
 	}
 	return ""
@@ -1076,7 +1077,7 @@ func trimTail(b *strings.Builder, maxRunes int) {
 	}
 	tail := string([]rune(s)[len([]rune(s))-maxRunes:])
 	b.Reset()
-	b.WriteString("_(... earlier content omitted)_\n\n")
+	b.WriteString(i18n.T("_(... earlier content omitted)_\n\n"))
 	b.WriteString(tail)
 }
 
@@ -1089,7 +1090,7 @@ func trimTailString(s string, maxRunes int, dropped *bool) string {
 	}
 	*dropped = true
 	tail := string([]rune(s)[len([]rune(s))-maxRunes:])
-	return "_(... earlier content omitted)_\n\n" + tail
+	return i18n.T("_(... earlier content omitted)_\n\n") + tail
 }
 
 func boolStr(b bool, yes, no string) string {

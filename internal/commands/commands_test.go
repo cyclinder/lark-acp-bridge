@@ -11,6 +11,7 @@ import (
 	"github.com/cognition/lark-acp-bridge/internal/agent"
 	"github.com/cognition/lark-acp-bridge/internal/card"
 	"github.com/cognition/lark-acp-bridge/internal/config"
+	"github.com/cognition/lark-acp-bridge/internal/i18n"
 	"github.com/cognition/lark-acp-bridge/internal/run"
 	"github.com/cognition/lark-acp-bridge/internal/session"
 	"github.com/cognition/lark-acp-bridge/internal/workspace"
@@ -529,5 +530,33 @@ func TestHandleSessionsListCapped(t *testing.T) {
 	}
 	if strings.Contains(content, "21. ") {
 		t.Errorf("card renders more than %d rows", card.MaxSessionRows)
+	}
+}
+
+func TestTryDispatchChineseAlias(t *testing.T) {
+	ctx := newTestContext(t)
+	handled, err := TryDispatch("/新建", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch(/新建) = (%v, %v), want (true, nil)", handled, err)
+	}
+	sender := ctx.Sender.(*fakeSender)
+	if len(sender.markdowns) != 1 || sender.markdowns[0].markdown != "Session cleared." {
+		t.Errorf("unexpected reply: %+v", sender.markdowns)
+	}
+}
+
+func TestDispatchRepliesInChinese(t *testing.T) {
+	if err := i18n.SetLocale("zh"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = i18n.SetLocale("en") })
+	ctx := newTestContext(t)
+	handled, err := TryDispatch("/new", ctx)
+	if !handled || err != nil {
+		t.Fatalf("TryDispatch(/new) = (%v, %v), want (true, nil)", handled, err)
+	}
+	sender := ctx.Sender.(*fakeSender)
+	if len(sender.markdowns) != 1 || sender.markdowns[0].markdown != "会话已清除。" {
+		t.Errorf("unexpected reply: %+v", sender.markdowns)
 	}
 }
