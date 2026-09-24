@@ -130,7 +130,7 @@ func TestBuildTranscriptMaxImagesPrefersNewest(t *testing.T) {
 
 func TestRenderNewIssuePrompt(t *testing.T) {
 	got := renderNewIssuePrompt("", "o/r", "带上 bug 标签", "[..] 用户A: hi\n", 1)
-	for _, want := range []string{"o/r", "共 1 条", "附加要求：带上 bug 标签", "用户A: hi", "gh issue create", "非 fork", "候选仓库列表", "ISSUE_TEMPLATE", "中文版本"} {
+	for _, want := range []string{"o/r", "共 1 条", "附加要求：带上 bug 标签", "用户A: hi", "gh issue create", "非 fork", "候选仓库列表", "ISSUE_TEMPLATE", "中文版本", "查重"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q", want)
 		}
